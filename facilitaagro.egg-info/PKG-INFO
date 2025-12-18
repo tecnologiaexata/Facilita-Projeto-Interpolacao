@@ -1,0 +1,267 @@
+Metadata-Version: 2.4
+Name: facilitaagro
+Version: 0.1.0
+Summary: Pipeline geoespacial para interpolação de dados agrícolas e integração via FastAPI
+Author-email: Exata <exata@exata.com>
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: python-multipart
+Requires-Dist: numpy
+Requires-Dist: pandas
+Requires-Dist: geopandas
+Requires-Dist: shapely
+Requires-Dist: rasterio
+Requires-Dist: matplotlib
+Requires-Dist: scikit-learn
+Requires-Dist: scipy
+Requires-Dist: pykrige
+Requires-Dist: libpysal
+Requires-Dist: esda
+Requires-Dist: scikit-gstat
+Requires-Dist: pydantic
+Provides-Extra: dev
+Requires-Dist: ipykernel; extra == "dev"
+Requires-Dist: jupyter; extra == "dev"
+
+# 📘 README — Facilita Agro API & Pipelines Geoespaciais
+
+## Visão Geral
+
+Módulos do **Facilita Agro** para processamento automatizado de:
+
+- Amostragens de solo  
+- Amostragens foliares  
+- Amostragens de compactação  
+- Amostragens de nematoides  
+- Mapas de produtividade (módulo “produção”)  
+
+Cada módulo passa por:
+
+1. **Carregamento do CSV**  
+2. **Validação e detecção das colunas padronizadas**  
+3. **Conversão espacial e reprojeção**  
+4. **Interpolação (IDW ou Kriging, com escolha automática)**  
+5. **Geração de rasters GeoTIFF**  
+6. **Amostragem dos valores na grade da lavoura**  
+7. **Exportação de CSVs por processo (`csv_solo`, `csv_prod`, …)**  
+8. **Construção incremental do grid completo (`grid_completo.csv`)**
+
+A API fornece endpoints para rodar os pipelines diretamente via upload de CSV.
+
+---
+
+# 📁 Estrutura do Projeto
+
+```
+facilita-agro/
+│
+├── facilita_agro/               # Lógica dos pipelines
+│   ├── analise_espacial.py
+│   ├── interpolador.py
+│   ├── processador_amostragem.py
+│   ├── pipeline_completa.py
+│   ├── pipeline_yield.py
+│   ├── grid_completo.py
+│   ├── logger.py
+│   └── ...
+│
+├── api/                         # FastAPI
+│   ├── __init__.py
+│   └── main.py
+│
+├── data/
+│   ├── contornos/               # KML/SHP por lavoura (entrada)
+│   ├── amostragem/              # CSVs de solo/foliar/compac/nemat
+│   └── yield/                   # CSVs de produtividade
+│
+├── outputs/
+│   ├── rasters_amostragem/      # GeoTIFFs gerados
+│   ├── rasters_yield/
+│   ├── csv/                     # csv_solo, csv_prod, ...
+│   └── csv_grid_completo/       # grid consolidado por lavoura
+│
+├── Dockerfile
+├── requirements.txt
+├── pyproject.toml
+└── README.md
+```
+
+---
+
+# Rodando localmente
+
+## 1. Criar ambiente
+
+```bash
+conda create -n facilita python=3.11
+conda activate facilita
+pip install -r requirements.txt
+```
+
+## 2. Rodar a API
+
+```bash
+uvicorn api.main:app --reload --port 8000
+```
+
+Abrir no navegador:
+
+- Swagger UI → http://127.0.0.1:8000/docs  
+- Health check → http://127.0.0.1:8000/health  
+
+---
+
+# 🐳 Rodando via Docker
+
+## Build da imagem
+
+```bash
+docker build -t facilita-agro .
+```
+
+## Rodar o container
+
+```bash
+docker run -p 8000:8000 -v $(pwd)/data:/app/data -v $(pwd)/outputs:/app/outputs facilita-agro
+```
+
+A API estará disponível em:
+
+```
+http://localhost:8000
+```
+
+---
+
+# Estrutura dos Arquivos de Entrada
+
+## 1. Contorno da Lavoura
+Um arquivo por lavoura:
+
+```
+data/contornos/<lavoura>.kml
+ou
+data/contornos/<lavoura>.shp
+```
+
+## 2. Amostragem por processo
+Arquivos CSV com colunas padronizadas.
+
+### Comuns:
+`Data, Cliente, Fazenda, Talhão, Gleba, Lat, Long`
+
+### Solo:
+`pH H2O, K, Ca, Mg, MO, Argila, ...`
+
+### Foliar:
+`N, P, K, Ca, Mg, S, B, Cu, Fe, Mn, Zn`
+
+### Compactação:
+`Profundidade, Kpa`
+
+### Nematoide:
+`Espécie, Quantidade, U/100cc`
+
+## 3. Produtividade (yield)
+Colunas obrigatórias:
+- `Kg/Ha`
+- `Média de produção Kg/Ha (Balança)`  
+- `Lat, Long, Data`
+
+---
+
+# 🌐 API — Endpoints
+
+## 🔎 Health Check
+
+```
+GET /health
+```
+
+---
+
+## Processar Amostragem (solo/foliar/compac/nemat)
+
+### Endpoint Upload:
+
+```
+POST /processar-amostragem-upload
+```
+
+Campos:
+- `lavoura`  
+- `processo`: `"solo"`, `"foliar"`, `"compac"`, `"nemat"`  
+- `arquivo_csv`  
+- `atualizar_grid_completo`
+
+Retorna:
+```json
+{
+  "sucesso": true,
+  "caminho_csv_grid": "...",
+  "caminho_csv_grid_completo": "...",
+  "colunas": [...]
+}
+```
+
+---
+
+## Processar Yield (Produtividade)
+
+```
+POST /processar-yield-upload
+```
+
+Corrige a média pelo valor da balança e realiza Kriging (ou IDW fallback).
+
+---
+
+## Atualizar grid completo
+
+```
+POST /atualizar-grid-completo
+```
+
+---
+
+# Estrutura do grid completo
+
+Colunas fixas:
+
+`id_ponto, Cliente, Fazenda, Talhão, Gleba, Lat, Long`
+
+Colunas de data por processo:
+
+`Data_solo, Data_prod, Data_foliar, Data_compac, Data_nemat`
+
+Atributos:
+
+`K_solo`, `MO_solo`, `Ca_foliar`, `Kg/Ha_prod`, etc.
+
+---
+
+# Funcionamento Interno
+
+### 🔹 Interpolação automática
+- Teste de dependência espacial
+- Variograma
+- Seleção de algoritmo
+
+### 🔹 Ajuste estatístico da produtividade
+`Kg/Ha` é recalibrado pela balança.
+
+### 🔹 Grade fixa
+Gerada a partir do contorno da lavoura.
+
+---
+
+# ✔️ Pronto para Produção
+- API estável  
+- Pipelines consolidados  
+- Grid completo padronizado  
+- Docker operacional  
+
+---
+

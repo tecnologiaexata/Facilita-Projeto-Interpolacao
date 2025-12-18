@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "facilitaagro"
+version = "0.2.0"
+description = "Pipelines geoespaciais para processamento, interpolação e integração de dados agrícolas via FastAPI"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+  { name = "Exata", email = "exata@exata.com" }
+]
+dependencies = [
+  "fastapi",
+  "uvicorn",
+  "python-multipart",
+  "numpy",
+  "pandas",
+  "geopandas",
+  "shapely",
+  "rasterio",
+  "matplotlib",
+  "scikit-learn",
+  "scipy",
+  "pykrige",
+  "libpysal",
+  "esda",
+  "scikit-gstat",
+  "pydantic",
+  "pyarrow"
+]
+
+[project.optional-dependencies]
+dev = [
+  "ipykernel",
+  "jupyter"
+]
+
+[tool.setuptools]
+packages = ["facilita_agro", "api"]
