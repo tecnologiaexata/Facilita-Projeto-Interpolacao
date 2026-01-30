@@ -2,6 +2,8 @@
 processador_lavoura.py - Gestão de contorno e grade amostral da lavoura
 """
 
+import os
+import tempfile
 import warnings
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any, List
@@ -9,6 +11,7 @@ from typing import Optional, Tuple, Dict, Any, List
 import geopandas as gpd
 import pandas as pd
 import numpy as np
+import requests
 from shapely.geometry import Point
 from shapely.ops import nearest_points
 
@@ -39,6 +42,10 @@ class ProcessadorLavoura:
         self.contorno: Optional[gpd.GeoDataFrame] = None
         self.grade: Optional[gpd.GeoDataFrame] = None
         self.crs_utm: Optional[str] = None
+        self.tipo: Optional[str] = None
+        self.identificador: Optional[int] = None
+        self.url_kml: Optional[str] = None
+        self.url_grade: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Helpers internos
@@ -57,6 +64,74 @@ class ProcessadorLavoura:
             self.logger.log(nivel, etapa, mensagem, dados, mostrar_usuario)
         else:
             print(f"[{nivel.value}] {etapa}: {mensagem}")
+
+    def _baixar_arquivo(self, url: str, sufixo_padrao: str) -> Path:
+        """Baixa um arquivo remoto e retorna o caminho temporário."""
+        resposta = requests.get(url, timeout=60)
+        resposta.raise_for_status()
+
+        sufixo = Path(url).suffix or sufixo_padrao
+        with tempfile.NamedTemporaryFile(delete=False, suffix=sufixo) as arquivo_temp:
+            arquivo_temp.write(resposta.content)
+            return Path(arquivo_temp.name)
+
+    def _consultar_kml_grade(self, tipo: str, identificador: int) -> Dict[str, Any]:
+        """Consulta o endpoint do front para obter URLs do KML e grade."""
+        base_url = os.getenv("FACILITAGRO_FRONTEND_BASE_URL", "https://facilitagro.com.br")
+        endpoint = f"{base_url.rstrip('/')}/api/v2/consultarKmlGrade"
+        resposta = requests.post(
+            endpoint,
+            json={"tipo": tipo, "id": identificador},
+            timeout=30,
+        )
+        resposta.raise_for_status()
+        dados = resposta.json()
+
+        if "url_kml" not in dados:
+            raise ValueError("Resposta de consultarKmlGrade sem url_kml.")
+
+        return dados
+
+    def _atualizar_kml_grade(self, tipo: str, identificador: int, url_grade: str) -> None:
+        """Envia ao front a URL pública da grade para correlação."""
+        base_url = os.getenv("FACILITAGRO_FRONTEND_BASE_URL", "https://facilitagro.com.br")
+        endpoint = f"{base_url.rstrip('/')}/api/v2/atualizarKmlGrade"
+        resposta = requests.post(
+            endpoint,
+            json={"tipo": tipo, "id": identificador, "url_grade": url_grade},
+            timeout=30,
+        )
+        resposta.raise_for_status()
+
+    def _upload_grade_blob(self, caminho_grade: Path, nome_arquivo: str) -> str:
+        """Envia a grade para o blob storage da Vercel e retorna a URL pública."""
+        token = os.getenv("NEXT_PUBLIC_BLOB_READ_WRITE_TOKEN")
+        if not token:
+            raise ValueError("Variável NEXT_PUBLIC_BLOB_READ_WRITE_TOKEN não configurada.")
+
+        endpoint = f"https://blob.vercel-storage.com/{nome_arquivo}"
+        with open(caminho_grade, "rb") as arquivo:
+            resposta = requests.put(
+                endpoint,
+                data=arquivo,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/octet-stream",
+                },
+                timeout=60,
+            )
+        resposta.raise_for_status()
+
+        url_blob = resposta.headers.get("x-vercel-blob-url")
+        if url_blob:
+            return url_blob
+
+        try:
+            dados = resposta.json()
+        except ValueError:
+            dados = {}
+
+        return dados.get("url") or dados.get("downloadUrl") or endpoint
 
     # ------------------------------------------------------------------
     # 1. Contorno
@@ -95,6 +170,55 @@ class ProcessadorLavoura:
             msg = f"Erro ao carregar perímetro: {str(e)}"
             self._log(NivelLog.ERROR, "checar_perimetro", msg, mostrar_usuario=True)
             return False, msg
+
+    def checar_perimetroV2(self, tipo: str, identificador: int) -> Tuple[bool, str, Dict[str, Any]]:
+        """
+        Verifica e importa o perímetro da lavoura via URL de KML (KML em 4326 → UTM).
+        Consulta o endpoint do front com tipo/id para obter url_kml/url_grade.
+        """
+        try:
+            dados = self._consultar_kml_grade(tipo, identificador)
+            url_kml = dados.get("url_kml")
+            url_grade = dados.get("url_grade")
+
+            if not url_kml:
+                msg = "URL do KML não encontrada."
+                self._log(NivelLog.WARNING, "checar_perimetroV2", msg, mostrar_usuario=True)
+                return False, msg, dados
+
+            caminho_kml = self._baixar_arquivo(url_kml, ".kml")
+            gdf = gpd.read_file(caminho_kml)
+            caminho_kml.unlink(missing_ok=True)
+
+            if gdf.crs is None:
+                gdf = gdf.set_crs(4326)
+
+            centroid = gdf.to_crs(4326).geometry.centroid.iloc[0]
+            zona_utm = self._determinar_zona_utm(centroid.y, centroid.x)
+
+            gdf_utm = gdf.to_crs(zona_utm)
+
+            self.contorno = gdf_utm
+            self.crs_utm = zona_utm
+            self.tipo = tipo
+            self.identificador = identificador
+            self.url_kml = url_kml
+            self.url_grade = url_grade
+
+            msg = f"Perímetro carregado com sucesso. CRS: {zona_utm}"
+            self._log(NivelLog.INFO, "checar_perimetroV2", msg, mostrar_usuario=True)
+
+            return True, msg, {
+                "tipo": tipo,
+                "id": identificador,
+                "url_kml": url_kml,
+                "url_grade": url_grade,
+            }
+
+        except Exception as e:
+            msg = f"Erro ao carregar perímetro: {str(e)}"
+            self._log(NivelLog.ERROR, "checar_perimetroV2", msg, mostrar_usuario=True)
+            return False, msg, {"tipo": tipo, "id": identificador}
 
     def _determinar_zona_utm(self, lat: float, lon: float) -> str:
         """
@@ -139,6 +263,80 @@ class ProcessadorLavoura:
             return False, msg
 
         return self._criar_grade_1ha(arquivo_grade)
+
+    def gerenciar_gradeV2(
+        self,
+        tipo: str,
+        identificador: int,
+        url_kml: str,
+        url_grade: Optional[str] = None,
+    ) -> Tuple[bool, str, Dict[str, Any]]:
+        """
+        Gerencia grade via URL. Se url_grade existir, valida; senão cria, envia ao blob
+        storage e atualiza o endpoint do front.
+        """
+        try:
+            if self.contorno is None:
+                msg = "Perímetro não carregado. Execute checar_perimetroV2() primeiro."
+                self._log(NivelLog.ERROR, "gerenciar_gradeV2", msg, mostrar_usuario=True)
+                return False, msg, {
+                    "tipo": tipo,
+                    "id": identificador,
+                    "url_kml": url_kml,
+                    "url_grade": url_grade,
+                }
+
+            if url_grade:
+                caminho_grade = self._baixar_arquivo(url_grade, ".gpkg")
+                gdf_grade = gpd.read_file(caminho_grade)
+                caminho_grade.unlink(missing_ok=True)
+                gdf_grade = self._validar_e_corrigir_grade(gdf_grade)
+                self.grade = gdf_grade
+
+                msg = f"Grade existente carregada: {len(self.grade)} pontos"
+                self._log(NivelLog.INFO, "gerenciar_gradeV2", msg, mostrar_usuario=True)
+                return True, msg, {
+                    "tipo": tipo,
+                    "id": identificador,
+                    "url_kml": url_kml,
+                    "url_grade": url_grade,
+                }
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                caminho_grade = Path(temp_dir) / f"{tipo}_{identificador}_grade.gpkg"
+                ok, msg = self._criar_grade_1ha(caminho_grade)
+                if not ok:
+                    return False, msg, {
+                        "tipo": tipo,
+                        "id": identificador,
+                        "url_kml": url_kml,
+                        "url_grade": url_grade,
+                    }
+
+                nome_arquivo = f"{tipo}_{identificador}_grade.gpkg"
+                url_grade_publica = self._upload_grade_blob(caminho_grade, nome_arquivo)
+                self._atualizar_kml_grade(tipo, identificador, url_grade_publica)
+
+            self.url_grade = url_grade_publica
+
+            msg = "Grade criada, enviada ao blob storage e vinculada com sucesso."
+            self._log(NivelLog.INFO, "gerenciar_gradeV2", msg, mostrar_usuario=True)
+            return True, msg, {
+                "tipo": tipo,
+                "id": identificador,
+                "url_kml": url_kml,
+                "url_grade": url_grade_publica,
+            }
+
+        except Exception as e:
+            msg = f"Erro ao gerenciar grade: {str(e)}"
+            self._log(NivelLog.ERROR, "gerenciar_gradeV2", msg, mostrar_usuario=True)
+            return False, msg, {
+                "tipo": tipo,
+                "id": identificador,
+                "url_kml": url_kml,
+                "url_grade": url_grade,
+            }
 
     def _validar_e_corrigir_grade(self, gdf_grade: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
         """

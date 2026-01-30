@@ -1,0 +1,318 @@
+{
+  "info": {
+    "name": "Facilita Agro - Interpolação & KML/Grade",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Coleção com exemplos de payload para os endpoints de interpolação, preprocessamento de yield, atualização de grid completo e integração com KML/grade."
+  },
+  "item": [
+    {
+      "name": "health",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{API_BASE_URL}}/health",
+          "host": [
+            "{{API_BASE_URL}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      }
+    },
+    {
+      "name": "processar-amostragem",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"lavoura\": \"fazenda_demo\",\n  \"arquivo_csv\": \"fazenda_demo_solo.csv\",\n  \"processo\": \"solo\",\n  \"atualizar_grid_completo\": true\n}"
+        },
+        "url": {
+          "raw": "{{API_BASE_URL}}/processar-amostragem",
+          "host": [
+            "{{API_BASE_URL}}"
+          ],
+          "path": [
+            "processar-amostragem"
+          ]
+        }
+      }
+    },
+    {
+      "name": "processar-amostragem-upload",
+      "request": {
+        "method": "POST",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "lavoura",
+              "value": "fazenda_demo",
+              "type": "text"
+            },
+            {
+              "key": "processo",
+              "value": "solo",
+              "type": "text"
+            },
+            {
+              "key": "atualizar_grid_completo",
+              "value": "true",
+              "type": "text"
+            },
+            {
+              "key": "arquivo_csv",
+              "type": "file",
+              "src": ""
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{API_BASE_URL}}/processar-amostragem-upload",
+          "host": [
+            "{{API_BASE_URL}}"
+          ],
+          "path": [
+            "processar-amostragem-upload"
+          ]
+        }
+      }
+    },
+    {
+      "name": "yield-preprocessar",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"lavoura\": \"fazenda_demo\",\n  \"projeto_colheita\": \"soja_2025\"\n}"
+        },
+        "url": {
+          "raw": "{{API_BASE_URL}}/yield/preprocessar",
+          "host": [
+            "{{API_BASE_URL}}"
+          ],
+          "path": [
+            "yield",
+            "preprocessar"
+          ]
+        }
+      }
+    },
+    {
+      "name": "yield-preprocessar-upload",
+      "request": {
+        "method": "POST",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "lavoura",
+              "value": "fazenda_demo",
+              "type": "text"
+            },
+            {
+              "key": "projeto_colheita",
+              "value": "soja_2025",
+              "type": "text"
+            },
+            {
+              "key": "arquivo_csv",
+              "type": "file",
+              "src": ""
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{API_BASE_URL}}/yield/preprocessar-upload",
+          "host": [
+            "{{API_BASE_URL}}"
+          ],
+          "path": [
+            "yield",
+            "preprocessar-upload"
+          ]
+        }
+      }
+    },
+    {
+      "name": "yield-interpolar",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"lavoura\": \"fazenda_demo\",\n  \"projeto_colheita\": \"soja_2025\",\n  \"atualizar_grid_completo\": true\n}"
+        },
+        "url": {
+          "raw": "{{API_BASE_URL}}/yield/interpolar",
+          "host": [
+            "{{API_BASE_URL}}"
+          ],
+          "path": [
+            "yield",
+            "interpolar"
+          ]
+        }
+      }
+    },
+    {
+      "name": "atualizar-grid-completo",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"lavoura\": \"fazenda_demo\"\n}"
+        },
+        "url": {
+          "raw": "{{API_BASE_URL}}/atualizar-grid-completo",
+          "host": [
+            "{{API_BASE_URL}}"
+          ],
+          "path": [
+            "atualizar-grid-completo"
+          ]
+        }
+      }
+    },
+    {
+      "name": "v2-checar-perimetro",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tipo\": \"gleba\",\n  \"id\": 123\n}"
+        },
+        "url": {
+          "raw": "{{API_BASE_URL}}/v2/checar-perimetro",
+          "host": [
+            "{{API_BASE_URL}}"
+          ],
+          "path": [
+            "v2",
+            "checar-perimetro"
+          ]
+        }
+      }
+    },
+    {
+      "name": "v2-gerenciar-grade",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tipo\": \"gleba\",\n  \"id\": 123,\n  \"url_kml\": null,\n  \"url_grade\": null\n}"
+        },
+        "url": {
+          "raw": "{{API_BASE_URL}}/v2/gerenciar-grade",
+          "host": [
+            "{{API_BASE_URL}}"
+          ],
+          "path": [
+            "v2",
+            "gerenciar-grade"
+          ]
+        }
+      }
+    },
+    {
+      "name": "consultarKmlGrade",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tipo\": \"gleba\",\n  \"id\": 123\n}"
+        },
+        "url": {
+          "raw": "{{FACILITAGRO_FRONTEND_BASE_URL}}/api/v2/consultarKmlGrade",
+          "host": [
+            "{{FACILITAGRO_FRONTEND_BASE_URL}}"
+          ],
+          "path": [
+            "api",
+            "v2",
+            "consultarKmlGrade"
+          ]
+        }
+      }
+    },
+    {
+      "name": "atualizarKmlGrade",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tipo\": \"gleba\",\n  \"id\": 123,\n  \"url_grade\": \"https://blob.vercel-storage.com/gleba_123_grade.gpkg\"\n}"
+        },
+        "url": {
+          "raw": "{{FACILITAGRO_FRONTEND_BASE_URL}}/api/v2/atualizarKmlGrade",
+          "host": [
+            "{{FACILITAGRO_FRONTEND_BASE_URL}}"
+          ],
+          "path": [
+            "api",
+            "v2",
+            "atualizarKmlGrade"
+          ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "API_BASE_URL",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "FACILITAGRO_FRONTEND_BASE_URL",
+      "value": "https://facilitagro.com.br"
+    }
+  ]
+}

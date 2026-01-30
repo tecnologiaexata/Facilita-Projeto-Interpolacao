@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel, Field
 
 from facilita_agro.logger import LoggerAgricola, NivelLog
+from facilita_agro.processador_lavoura import ProcessadorLavoura
 from facilita_agro.pipeline_completa import PipelineAgricola
 from facilita_agro.pipeline_yield import PipelineYield
 from facilita_agro.grid_completo import GridCompletoManager
@@ -91,6 +92,30 @@ class GridCompletoResponse(BaseModel):
     mensagem: str
     caminho_csv_grid_completo: Optional[str] = None
     colunas: Optional[List[str]] = None
+
+
+class ChecarPerimetroV2Request(BaseModel):
+    tipo: Literal["talhao", "gleba"] = Field(..., description="Tipo de área.")
+    id: int = Field(..., description="Identificador da área.")
+
+
+class GerenciarGradeV2Request(BaseModel):
+    tipo: Literal["talhao", "gleba"] = Field(..., description="Tipo de área.")
+    id: int = Field(..., description="Identificador da área.")
+    url_kml: Optional[str] = Field(
+        default=None,
+        description="URL do KML. Se omitido, será consultado via endpoint do front.",
+    )
+    url_grade: Optional[str] = Field(
+        default=None,
+        description="URL da grade existente, se já houver.",
+    )
+
+
+class KmlGradeResponse(BaseModel):
+    sucesso: bool
+    mensagem: str
+    dados: Optional[dict] = None
 
 
 # ============================================================
@@ -405,3 +430,55 @@ def atualizar_grid_completo(req: AtualizarGridCompletoRequest):
         caminho_csv_grid_completo=str(caminho),
         colunas=list(df.columns) if df is not None else None,
     )
+
+
+# --------------------- V2 KML/Grade ---------------------
+
+
+@app.post("/v2/checar-perimetro", response_model=KmlGradeResponse)
+def checar_perimetro_v2(req: ChecarPerimetroV2Request):
+    """Carrega o perímetro via URL de KML obtida do front."""
+    logger = LoggerAgricola(f"{req.tipo}_{req.id}", salvar_arquivo=True)
+    processador = ProcessadorLavoura(
+        nome_lavoura=f"{req.tipo}_{req.id}",
+        diretorio_base=BASE_DIR,
+        logger=logger,
+    )
+
+    ok, msg, dados = processador.checar_perimetroV2(req.tipo, req.id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+
+    return KmlGradeResponse(sucesso=True, mensagem=msg, dados=dados)
+
+
+@app.post("/v2/gerenciar-grade", response_model=KmlGradeResponse)
+def gerenciar_grade_v2(req: GerenciarGradeV2Request):
+    """Valida ou cria grade via URL, com upload ao blob storage quando necessário."""
+    logger = LoggerAgricola(f"{req.tipo}_{req.id}", salvar_arquivo=True)
+    processador = ProcessadorLavoura(
+        nome_lavoura=f"{req.tipo}_{req.id}",
+        diretorio_base=BASE_DIR,
+        logger=logger,
+    )
+
+    ok, msg, dados = processador.checar_perimetroV2(req.tipo, req.id)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+
+    url_kml = req.url_kml or dados.get("url_kml")
+    url_grade = req.url_grade or dados.get("url_grade")
+
+    if not url_kml:
+        raise HTTPException(status_code=400, detail="URL do KML não encontrada.")
+
+    ok_grade, msg_grade, dados_grade = processador.gerenciar_gradeV2(
+        req.tipo,
+        req.id,
+        url_kml,
+        url_grade,
+    )
+    if not ok_grade:
+        raise HTTPException(status_code=400, detail=msg_grade)
+
+    return KmlGradeResponse(sucesso=True, mensagem=msg_grade, dados=dados_grade)

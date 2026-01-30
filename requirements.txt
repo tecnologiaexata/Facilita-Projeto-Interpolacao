@@ -8,6 +8,7 @@ geopandas
 shapely
 rasterio
 matplotlib
+requests
 
 scikit-learn
 scipy
