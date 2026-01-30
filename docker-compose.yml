@@ -10,5 +10,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./outputs:/app/outputs
+    env_file:
+      - .env
     environment:
       - PYTHONUNBUFFERED=1
