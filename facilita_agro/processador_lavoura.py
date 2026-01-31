@@ -220,6 +220,36 @@ class ProcessadorLavoura:
             self._log(NivelLog.ERROR, "checar_perimetroV2", msg, mostrar_usuario=True)
             return False, msg, {"tipo": tipo, "id": identificador}
 
+    def checar_perimetro_url(self, url_kml: str) -> Tuple[bool, str]:
+        """
+        Verifica e importa o perímetro da lavoura via URL de KML (KML em 4326 → UTM).
+        """
+        try:
+            caminho_kml = self._baixar_arquivo(url_kml, ".kml")
+            gdf = gpd.read_file(caminho_kml)
+            caminho_kml.unlink(missing_ok=True)
+
+            if gdf.crs is None:
+                gdf = gdf.set_crs(4326)
+
+            centroid = gdf.to_crs(4326).geometry.centroid.iloc[0]
+            zona_utm = self._determinar_zona_utm(centroid.y, centroid.x)
+
+            gdf_utm = gdf.to_crs(zona_utm)
+
+            self.contorno = gdf_utm
+            self.crs_utm = zona_utm
+            self.url_kml = url_kml
+
+            msg = f"Perímetro carregado com sucesso. CRS: {zona_utm}"
+            self._log(NivelLog.INFO, "checar_perimetro_url", msg, mostrar_usuario=True)
+            return True, msg
+
+        except Exception as e:
+            msg = f"Erro ao carregar perímetro: {str(e)}"
+            self._log(NivelLog.ERROR, "checar_perimetro_url", msg, mostrar_usuario=True)
+            return False, msg
+
     def _determinar_zona_utm(self, lat: float, lon: float) -> str:
         """
         Determina a zona UTM automaticamente baseada nas coordenadas (lat, lon).
