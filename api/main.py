@@ -123,7 +123,7 @@ class ProcessarAmostragemV2Request(BaseModel):
     cultura: Optional[str] = None
     dados: List[DadoAmostraV2]
 
-    @root_validator
+    @root_validator(skip_on_failure=True)
     def validar_contexto(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         tipo = values.get("tipo")
         talhao = values.get("talhao")
