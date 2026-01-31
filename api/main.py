@@ -5,6 +5,7 @@ from typing import Optional, List, Literal, Dict, Any, Union
 import os
 import re
 import tempfile
+import json
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel, Field, root_validator
@@ -189,7 +190,6 @@ app = FastAPI(
     version="0.3.1",
 )
 
-
 # ============================================================
 # Helpers
 # ============================================================
@@ -221,16 +221,57 @@ def _slugify_nome(valor: str) -> str:
 
 
 def _storage_base_url() -> str:
-    base_url = os.getenv("FACILITAGRO_STORAGE_BASE_URL")
+    base_url = os.getenv("FACILITAGRO_FRONTEND_BASE_URL")
     if not base_url:
-        raise ValueError("FACILITAGRO_STORAGE_BASE_URL não configurada.")
+        raise ValueError("FACILITAGRO_FRONTEND_BASE_URL não configurada.")
     return base_url.rstrip("/")
 
 
-def _post_storage(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def _post_storage(
+    endpoint: str,
+    payload: Dict[str, Any],
+    logger: Optional[LoggerAgricola] = None,
+    log_tag: str = "storage_post",
+) -> Dict[str, Any]:
+    """
+    POST no storage externo + logs completos do que foi enviado (estilo console.log).
+    Se logger não for passado, ainda faz o POST normalmente.
+    """
     url = f"{_storage_base_url()}{endpoint}"
+
+    # 🔍 DEBUG: log do request (URL + BODY)
+    try:
+        payload_dump = json.dumps(payload, indent=2, ensure_ascii=False, default=str)
+    except Exception:
+        payload_dump = str(payload)
+
+    if logger is not None:
+        logger.log(
+            NivelLog.INFO,
+            log_tag,
+            f"POST {url}\nPAYLOAD:\n{payload_dump}",
+            mostrar_usuario=True,
+        )
+    else:
+        print(f"[DEBUG] POST {url}\nPAYLOAD:\n{payload_dump}")
+
     resposta = requests.post(url, json=payload, timeout=60)
+
+    # 🔍 DEBUG: log da resposta (status + body) quando não for 2xx
+    if resposta.status_code >= 400:
+        body_preview = (resposta.text or "")[:4000]
+        if logger is not None:
+            logger.log(
+                NivelLog.ERROR,
+                f"{log_tag}_erro",
+                f"Resposta HTTP {resposta.status_code} em {url}\nBODY:\n{body_preview}",
+                mostrar_usuario=True,
+            )
+        else:
+            print(f"[DEBUG] HTTP {resposta.status_code} {url}\nBODY:\n{body_preview}")
+
     resposta.raise_for_status()
+
     try:
         return resposta.json()
     except ValueError:
@@ -579,7 +620,6 @@ def atualizar_grid_completo(req: AtualizarGridCompletoRequest):
 
 # --------------------- V2 KML/Grade ---------------------
 
-
 @app.post("/v2/checar-perimetro", response_model=KmlGradeResponse)
 def checar_perimetro_v2(req: ChecarPerimetroV2Request):
     """Carrega o perímetro via URL de KML obtida do front."""
@@ -630,7 +670,6 @@ def gerenciar_grade_v2(req: GerenciarGradeV2Request):
 
 
 # --------------------- V2 Processar Amostragem ---------------------
-
 
 @app.post("/v2/processar-amostragem", response_model=ProcessamentoV2Response)
 def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
@@ -796,29 +835,38 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
                     mostrar_usuario=True,
                 )
                 url_blob = upload_blob_file(caminho_tif, nome_blob)
+
+                # ✅ PAYLOAD EM VARIÁVEL + LOG COMPLETO (estilo console.log)
+                payload_raster = {
+                    "tipo": req.tipo,
+                    "id": req.id,
+                    "processo": processo,
+                    "atributo": attr,
+                    "campanha": rotulo_campanha,
+                    "url": url_blob,
+                    "cliente_id": req.cliente_id,
+                    "data": req.data,
+                    "fazenda": req.fazenda,
+                    "talhao": req.talhao,
+                    "gleba": req.gleba,
+                    "profundidade": req.profundidade,
+                }
+
                 logger.log(
                     NivelLog.INFO,
                     "v2_notificar_raster",
                     f"Notificando raster interpolado '{attr}' no storage externo.",
                     mostrar_usuario=True,
                 )
+
+                # ✅ Agora o _post_storage já loga URL + BODY + ERRO (se houver)
                 _post_storage(
                     "/api/v2/add_raster_interpolados",
-                    {
-                        "tipo": req.tipo,
-                        "id": req.id,
-                        "processo": processo,
-                        "atributo": attr,
-                        "campanha": rotulo_campanha,
-                        "url": url_blob,
-                        "cliente_id": req.cliente_id,
-                        "data": req.data,
-                        "fazenda": req.fazenda,
-                        "talhao": req.talhao,
-                        "gleba": req.gleba,
-                        "profundidade": req.profundidade,
-                    },
+                    payload_raster,
+                    logger=logger,
+                    log_tag="v2_payload_raster",
                 )
+
             except Exception as exc:
                 logger.log(
                     NivelLog.ERROR,
@@ -830,6 +878,7 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
                     status_code=502,
                     detail="Falha ao enviar raster interpolado para armazenamento externo.",
                 ) from exc
+
             rasters_enviados.append(RasterInterpoladoResponse(atributo=attr, url=url_blob))
 
         grid_enviado = False
@@ -842,7 +891,15 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
                     "Enviando grid completo ao storage externo.",
                     mostrar_usuario=True,
                 )
-                _post_storage("/api/v2/add_interpolacao_grid_completo", payload_grid)
+
+                # ✅ Também loga payload do grid (muito útil!)
+                _post_storage(
+                    "/api/v2/add_interpolacao_grid_completo",
+                    payload_grid,
+                    logger=logger,
+                    log_tag="v2_payload_grid",
+                )
+
             except Exception as exc:
                 logger.log(
                     NivelLog.ERROR,
