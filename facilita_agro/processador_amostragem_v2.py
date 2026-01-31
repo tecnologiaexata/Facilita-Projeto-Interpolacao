@@ -74,7 +74,7 @@ class ProcessadorAmostragemV2(ProcessadorAmostragem):
                 "latitude": dado.get("latitude"),
                 "longitude": dado.get("longitude"),
                 "Ponto": dado.get("ponto_coleta"),
-                "Profundidade": dado.get("profundidade"),
+                "Profundidade": dado.get("profundidade", self.metadados.get("profundidade")),
                 "Data": self.metadados.get("data"),
                 "Cliente": self.metadados.get("cliente"),
                 "Fazenda": self.metadados.get("fazenda"),

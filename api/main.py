@@ -104,7 +104,7 @@ class DadoAmostraV2(BaseModel):
     latitude: float
     longitude: float
     ponto_coleta: Optional[str] = None
-    profundidade: Optional[str] = None
+    profundidade: Optional[int] = None
     atributos: List[AtributoV2]
 
 
@@ -117,10 +117,11 @@ class ProcessarAmostragemV2Request(BaseModel):
     processo: ProcessoTipo
     cliente_id: Optional[int] = None
     data: str
-    fazenda: Optional[str] = None
-    talhao: str
-    gleba: Optional[str] = None
+    fazenda: Optional[int] = None
+    talhao: int
+    gleba: Optional[int] = None
     cultura: Optional[str] = None
+    profundidade: Optional[int] = None
     dados: List[DadoAmostraV2]
 
     @root_validator(skip_on_failure=True)
@@ -248,7 +249,17 @@ def _montar_payload_grid_completo(
     req: ProcessarAmostragemV2Request,
     df_final: pd.DataFrame,
 ) -> Dict[str, Any]:
-    cols_base = ["id_ponto", "Data", "Cliente", "Fazenda", "Talhão", "Gleba", "Lat", "Long"]
+    cols_base = [
+        "id_ponto",
+        "Data",
+        "Cliente",
+        "Fazenda",
+        "Talhão",
+        "Gleba",
+        "Profundidade",
+        "Lat",
+        "Long",
+    ]
     atributos_cols = [c for c in df_final.columns if c not in cols_base]
 
     pontos = []
@@ -267,6 +278,7 @@ def _montar_payload_grid_completo(
                 "fazenda": _serializar_valor(row.get("Fazenda")),
                 "talhao": _serializar_valor(row.get("Talhão")),
                 "gleba": _serializar_valor(row.get("Gleba")),
+                "profundidade": _serializar_valor(row.get("Profundidade")),
                 "atributos": atributos,
             }
         )
@@ -281,6 +293,7 @@ def _montar_payload_grid_completo(
         "talhao": req.talhao,
         "gleba": req.gleba,
         "cultura": req.cultura,
+        "profundidade": req.profundidade,
         "pontos": pontos,
     }
 
@@ -681,6 +694,7 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
             "talhao": req.talhao,
             "gleba": req.gleba,
             "cultura": req.cultura,
+            "profundidade": req.profundidade,
         },
         contorno_utm=proc_lav.contorno,
         crs_utm=proc_lav.crs_utm,
@@ -799,6 +813,10 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
                         "url": url_blob,
                         "cliente_id": req.cliente_id,
                         "data": req.data,
+                        "fazenda": req.fazenda,
+                        "talhao": req.talhao,
+                        "gleba": req.gleba,
+                        "profundidade": req.profundidade,
                     },
                 )
             except Exception as exc:
