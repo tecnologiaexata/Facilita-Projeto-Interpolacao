@@ -627,6 +627,12 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
 
     nome_lavoura = f"{req.tipo}_{req.id}"
     logger = LoggerAgricola(nome_lavoura, salvar_arquivo=True)
+    logger.log(
+        NivelLog.INFO,
+        "v2_inicio",
+        f"Iniciando processamento V2: tipo={req.tipo}, id={req.id}, processo={processo}",
+        mostrar_usuario=True,
+    )
 
     proc_lav = ProcessadorLavoura(
         nome_lavoura=nome_lavoura,
@@ -634,10 +640,22 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
         logger=logger,
     )
 
+    logger.log(
+        NivelLog.INFO,
+        "v2_perimetro",
+        f"Baixando perímetro via URL: {req.url_kml}",
+        mostrar_usuario=True,
+    )
     ok, msg = proc_lav.checar_perimetro_url(req.url_kml)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
 
+    logger.log(
+        NivelLog.INFO,
+        "v2_grade",
+        f"Validando grade via URL: {req.url_grade}",
+        mostrar_usuario=True,
+    )
     ok_grade, msg_grade, _ = proc_lav.gerenciar_gradeV2(
         req.tipo,
         req.id,
@@ -647,6 +665,12 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
     if not ok_grade:
         raise HTTPException(status_code=400, detail=msg_grade)
 
+    logger.log(
+        NivelLog.INFO,
+        "v2_payload",
+        f"Montando amostragem V2 com {len(req.dados)} pontos.",
+        mostrar_usuario=True,
+    )
     proc_am = ProcessadorAmostragemV2(
         nome_lavoura=nome_lavoura,
         dados=[item.dict() for item in req.dados],
@@ -663,6 +687,12 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
         logger=logger,
     )
 
+    logger.log(
+        NivelLog.INFO,
+        "v2_amostragem",
+        "Processando amostragem (fluxo original).",
+        mostrar_usuario=True,
+    )
     ok_am, msg_am, gdf_utm, atributos = proc_am.processar_amostragem()
     if not ok_am or gdf_utm is None or atributos is None:
         raise HTTPException(status_code=400, detail=msg_am)
@@ -671,6 +701,12 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
     proc_am.col_atributos = atributos
 
     with tempfile.TemporaryDirectory() as temp_dir:
+        logger.log(
+            NivelLog.INFO,
+            "v2_pipeline",
+            f"Executando pipeline em diretório temporário: {temp_dir}",
+            mostrar_usuario=True,
+        )
         pipeline = PipelineAgricola(
             logger=logger,
             dir_contornos=DIR_CONTORNOS,
@@ -687,6 +723,12 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
         )
 
         rotulo_campanha = pipeline._obter_rotulo_campanha(proc_am)
+        logger.log(
+            NivelLog.INFO,
+            "v2_rotulo_campanha",
+            f"Rótulo da campanha definido: {rotulo_campanha}",
+            mostrar_usuario=True,
+        )
         analise_atributos, attrs_interp = pipeline._analisar_atributos(proc_am, processo)
         if not analise_atributos or not attrs_interp:
             raise HTTPException(
@@ -696,6 +738,12 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
                 ),
             )
 
+        logger.log(
+            NivelLog.INFO,
+            "v2_interpolar",
+            f"Interpolando atributos: {attrs_interp}",
+            mostrar_usuario=True,
+        )
         caminhos_rasters = pipeline._interpolar_todos_atributos(
             nome_lavoura,
             rotulo_campanha,
@@ -708,6 +756,12 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
         if not caminhos_rasters:
             raise HTTPException(status_code=400, detail="Nenhum raster foi gerado.")
 
+        logger.log(
+            NivelLog.INFO,
+            "v2_amostragem_grade",
+            f"Amostrando rasters na grade: {len(caminhos_rasters)} atributos.",
+            mostrar_usuario=True,
+        )
         df_final = pipeline._amostrar_rasters_na_grade(
             proc_lav,
             proc_am,
@@ -721,7 +775,19 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
                 f"{req.tipo}_{req.id}_{processo}_{rotulo_campanha}_{attr}.tif"
             )
             try:
+                logger.log(
+                    NivelLog.INFO,
+                    "v2_upload_raster",
+                    f"Enviando raster '{attr}' para blob: {nome_blob}",
+                    mostrar_usuario=True,
+                )
                 url_blob = upload_blob_file(caminho_tif, nome_blob)
+                logger.log(
+                    NivelLog.INFO,
+                    "v2_notificar_raster",
+                    f"Notificando raster interpolado '{attr}' no storage externo.",
+                    mostrar_usuario=True,
+                )
                 _post_storage(
                     "/api/v2/add_raster_interpolados",
                     {
@@ -752,6 +818,12 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
         if req.gerar_csv:
             payload_grid = _montar_payload_grid_completo(req, df_final)
             try:
+                logger.log(
+                    NivelLog.INFO,
+                    "v2_notificar_grid",
+                    "Enviando grid completo ao storage externo.",
+                    mostrar_usuario=True,
+                )
                 _post_storage("/api/v2/add_interpolacao_grid_completo", payload_grid)
             except Exception as exc:
                 logger.log(

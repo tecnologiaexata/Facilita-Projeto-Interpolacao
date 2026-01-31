@@ -52,6 +52,12 @@ class ProcessadorAmostragemV2(ProcessadorAmostragem):
             self._log(NivelLog.ERROR, "carregar_payload", msg, mostrar_usuario=True)
             return False, msg
 
+        self._log(
+            NivelLog.INFO,
+            "carregar_payload",
+            f"Processando {len(self.dados)} registros do payload V2.",
+            mostrar_usuario=True,
+        )
         rows: list[dict[str, Any]] = []
         atributos_disponiveis: set[str] = set()
 
@@ -88,4 +94,3 @@ class ProcessadorAmostragemV2(ProcessadorAmostragem):
         msg = f"Payload V2 carregado: {len(df)} linhas, {len(df.columns)} colunas."
         self._log(NivelLog.INFO, "carregar_payload", msg, mostrar_usuario=True)
         return True, msg
-
