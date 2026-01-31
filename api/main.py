@@ -104,7 +104,7 @@ class DadoAmostraV2(BaseModel):
     latitude: float
     longitude: float
     ponto_coleta: Optional[str] = None
-    profundidade: Optional[str] = None
+    profundidade: int
     atributos: List[AtributoV2]
 
 
@@ -115,12 +115,13 @@ class ProcessarAmostragemV2Request(BaseModel):
     url_kml: str
     url_grade: str
     processo: ProcessoTipo
-    cliente_id: Optional[int] = None
+    cliente_id: int
     data: str
-    fazenda: Optional[str] = None
-    talhao: str
-    gleba: Optional[str] = None
+    fazenda: int
+    talhao: int
+    gleba: Optional[int] = None
     cultura: Optional[str] = None
+    profundidade: Optional[int] = None
     dados: List[DadoAmostraV2]
 
     @root_validator
@@ -131,7 +132,7 @@ class ProcessarAmostragemV2Request(BaseModel):
         if not talhao:
             raise ValueError("Campo 'talhao' é obrigatório.")
         if tipo == "gleba" and gleba is None:
-            return values
+            raise ValueError("Campo 'gleba' é obrigatório quando tipo=gleba.")
         return values
 
 
@@ -247,6 +248,7 @@ def _serializar_valor(valor: Any) -> Any:
 def _montar_payload_grid_completo(
     req: ProcessarAmostragemV2Request,
     df_final: pd.DataFrame,
+    profundidade: Optional[int],
 ) -> Dict[str, Any]:
     cols_base = ["id_ponto", "Data", "Cliente", "Fazenda", "Talhão", "Gleba", "Lat", "Long"]
     atributos_cols = [c for c in df_final.columns if c not in cols_base]
@@ -267,6 +269,7 @@ def _montar_payload_grid_completo(
                 "fazenda": _serializar_valor(row.get("Fazenda")),
                 "talhao": _serializar_valor(row.get("Talhão")),
                 "gleba": _serializar_valor(row.get("Gleba")),
+                "profundidade": profundidade,
                 "atributos": atributos,
             }
         )
@@ -281,6 +284,7 @@ def _montar_payload_grid_completo(
         "talhao": req.talhao,
         "gleba": req.gleba,
         "cultura": req.cultura,
+        "profundidade": profundidade,
         "pontos": pontos,
     }
 
@@ -671,172 +675,191 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
         f"Montando amostragem V2 com {len(req.dados)} pontos.",
         mostrar_usuario=True,
     )
-    proc_am = ProcessadorAmostragemV2(
-        nome_lavoura=nome_lavoura,
-        dados=[item.dict() for item in req.dados],
-        metadados={
-            "data": req.data,
-            "cliente": req.cliente_id,
-            "fazenda": req.fazenda,
-            "talhao": req.talhao,
-            "gleba": req.gleba,
-            "cultura": req.cultura,
-        },
-        contorno_utm=proc_lav.contorno,
-        crs_utm=proc_lav.crs_utm,
-        logger=logger,
-    )
 
-    logger.log(
-        NivelLog.INFO,
-        "v2_amostragem",
-        "Processando amostragem (fluxo original).",
-        mostrar_usuario=True,
-    )
-    ok_am, msg_am, gdf_utm, atributos = proc_am.processar_amostragem()
-    if not ok_am or gdf_utm is None or atributos is None:
-        raise HTTPException(status_code=400, detail=msg_am)
+    profundidades = sorted({item.profundidade for item in req.dados})
+    rasters_enviados: list[RasterInterpoladoResponse] = []
+    grid_enviado = False
+    rotulo_campanha = None
 
-    proc_am.gdf_utm = gdf_utm
-    proc_am.col_atributos = atributos
-
-    with tempfile.TemporaryDirectory() as temp_dir:
+    for profundidade in profundidades:
+        dados_filtrados = [item for item in req.dados if item.profundidade == profundidade]
         logger.log(
             NivelLog.INFO,
-            "v2_pipeline",
-            f"Executando pipeline em diretório temporário: {temp_dir}",
+            "v2_profundidade",
+            f"Processando profundidade={profundidade} com {len(dados_filtrados)} pontos.",
             mostrar_usuario=True,
         )
-        pipeline = PipelineAgricola(
+
+        proc_am = ProcessadorAmostragemV2(
+            nome_lavoura=nome_lavoura,
+            dados=[item.dict() for item in dados_filtrados],
+            metadados={
+                "data": req.data,
+                "cliente": req.cliente_id,
+                "fazenda": req.fazenda,
+                "talhao": req.talhao,
+                "gleba": req.gleba,
+                "cultura": req.cultura,
+            },
+            contorno_utm=proc_lav.contorno,
+            crs_utm=proc_lav.crs_utm,
             logger=logger,
-            dir_contornos=DIR_CONTORNOS,
-            dir_amostragem=DIR_AMOSTRAGEM,
-            dir_rasters=Path(temp_dir),
-            dir_csv_base=Path(temp_dir),
-            pixel_size=PIXEL_SIZE_DEFAULT,
         )
 
-        pipeline.logger.adicionar_contexto(
-            lavoura=nome_lavoura,
-            processo=processo,
-            pixel_size=PIXEL_SIZE_DEFAULT,
-        )
-
-        rotulo_campanha = pipeline._obter_rotulo_campanha(proc_am)
         logger.log(
             NivelLog.INFO,
-            "v2_rotulo_campanha",
-            f"Rótulo da campanha definido: {rotulo_campanha}",
+            "v2_amostragem",
+            "Processando amostragem (fluxo original).",
             mostrar_usuario=True,
         )
-        analise_atributos, attrs_interp = pipeline._analisar_atributos(proc_am, processo)
-        if not analise_atributos or not attrs_interp:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Nenhum atributo interpolável pôde ser analisado para processo '{processo}'."
-                ),
+        ok_am, msg_am, gdf_utm, atributos = proc_am.processar_amostragem()
+        if not ok_am or gdf_utm is None or atributos is None:
+            raise HTTPException(status_code=400, detail=msg_am)
+
+        proc_am.gdf_utm = gdf_utm
+        proc_am.col_atributos = atributos
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            logger.log(
+                NivelLog.INFO,
+                "v2_pipeline",
+                f"Executando pipeline em diretório temporário: {temp_dir}",
+                mostrar_usuario=True,
+            )
+            pipeline = PipelineAgricola(
+                logger=logger,
+                dir_contornos=DIR_CONTORNOS,
+                dir_amostragem=DIR_AMOSTRAGEM,
+                dir_rasters=Path(temp_dir),
+                dir_csv_base=Path(temp_dir),
+                pixel_size=PIXEL_SIZE_DEFAULT,
             )
 
-        logger.log(
-            NivelLog.INFO,
-            "v2_interpolar",
-            f"Interpolando atributos: {attrs_interp}",
-            mostrar_usuario=True,
-        )
-        caminhos_rasters = pipeline._interpolar_todos_atributos(
-            nome_lavoura,
-            rotulo_campanha,
-            processo,
-            proc_lav,
-            proc_am,
-            analise_atributos,
-            attrs_interp,
-        )
-        if not caminhos_rasters:
-            raise HTTPException(status_code=400, detail="Nenhum raster foi gerado.")
-
-        logger.log(
-            NivelLog.INFO,
-            "v2_amostragem_grade",
-            f"Amostrando rasters na grade: {len(caminhos_rasters)} atributos.",
-            mostrar_usuario=True,
-        )
-        df_final = pipeline._amostrar_rasters_na_grade(
-            proc_lav,
-            proc_am,
-            processo,
-            caminhos_rasters,
-        )
-
-        rasters_enviados: list[RasterInterpoladoResponse] = []
-        for attr, caminho_tif in caminhos_rasters.items():
-            nome_blob = _slugify_nome(
-                f"{req.tipo}_{req.id}_{processo}_{rotulo_campanha}_{attr}.tif"
+            pipeline.logger.adicionar_contexto(
+                lavoura=nome_lavoura,
+                processo=processo,
+                pixel_size=PIXEL_SIZE_DEFAULT,
             )
-            try:
-                logger.log(
-                    NivelLog.INFO,
-                    "v2_upload_raster",
-                    f"Enviando raster '{attr}' para blob: {nome_blob}",
-                    mostrar_usuario=True,
-                )
-                url_blob = upload_blob_file(caminho_tif, nome_blob)
-                logger.log(
-                    NivelLog.INFO,
-                    "v2_notificar_raster",
-                    f"Notificando raster interpolado '{attr}' no storage externo.",
-                    mostrar_usuario=True,
-                )
-                _post_storage(
-                    "/api/v2/add_raster_interpolados",
-                    {
-                        "tipo": req.tipo,
-                        "id": req.id,
-                        "processo": processo,
-                        "atributo": attr,
-                        "campanha": rotulo_campanha,
-                        "url": url_blob,
-                        "cliente_id": req.cliente_id,
-                        "data": req.data,
-                    },
-                )
-            except Exception as exc:
-                logger.log(
-                    NivelLog.ERROR,
-                    "v2_raster_storage",
-                    f"Falha ao enviar raster interpolado: {str(exc)}",
-                    mostrar_usuario=True,
-                )
-                raise HTTPException(
-                    status_code=502,
-                    detail="Falha ao enviar raster interpolado para armazenamento externo.",
-                ) from exc
-            rasters_enviados.append(RasterInterpoladoResponse(atributo=attr, url=url_blob))
 
-        grid_enviado = False
-        if req.gerar_csv:
-            payload_grid = _montar_payload_grid_completo(req, df_final)
-            try:
-                logger.log(
-                    NivelLog.INFO,
-                    "v2_notificar_grid",
-                    "Enviando grid completo ao storage externo.",
-                    mostrar_usuario=True,
-                )
-                _post_storage("/api/v2/add_interpolacao_grid_completo", payload_grid)
-            except Exception as exc:
-                logger.log(
-                    NivelLog.ERROR,
-                    "v2_grid_storage",
-                    f"Falha ao enviar grid completo: {str(exc)}",
-                    mostrar_usuario=True,
-                )
+            rotulo_campanha = pipeline._obter_rotulo_campanha(proc_am)
+            logger.log(
+                NivelLog.INFO,
+                "v2_rotulo_campanha",
+                f"Rótulo da campanha definido: {rotulo_campanha}",
+                mostrar_usuario=True,
+            )
+            analise_atributos, attrs_interp = pipeline._analisar_atributos(proc_am, processo)
+            if not analise_atributos or not attrs_interp:
                 raise HTTPException(
-                    status_code=502,
-                    detail="Falha ao enviar grid completo para armazenamento externo.",
-                ) from exc
-            grid_enviado = True
+                    status_code=400,
+                    detail=(
+                        f"Nenhum atributo interpolável pôde ser analisado para processo '{processo}'."
+                    ),
+                )
+
+            logger.log(
+                NivelLog.INFO,
+                "v2_interpolar",
+                f"Interpolando atributos: {attrs_interp}",
+                mostrar_usuario=True,
+            )
+            caminhos_rasters = pipeline._interpolar_todos_atributos(
+                nome_lavoura,
+                rotulo_campanha,
+                processo,
+                proc_lav,
+                proc_am,
+                analise_atributos,
+                attrs_interp,
+            )
+            if not caminhos_rasters:
+                raise HTTPException(status_code=400, detail="Nenhum raster foi gerado.")
+
+            logger.log(
+                NivelLog.INFO,
+                "v2_amostragem_grade",
+                f"Amostrando rasters na grade: {len(caminhos_rasters)} atributos.",
+                mostrar_usuario=True,
+            )
+            df_final = pipeline._amostrar_rasters_na_grade(
+                proc_lav,
+                proc_am,
+                processo,
+                caminhos_rasters,
+            )
+
+            for attr, caminho_tif in caminhos_rasters.items():
+                nome_blob = _slugify_nome(
+                    f"{req.tipo}_{req.id}_{processo}_{rotulo_campanha}_{profundidade}_{attr}.tif"
+                )
+                try:
+                    logger.log(
+                        NivelLog.INFO,
+                        "v2_upload_raster",
+                        f"Enviando raster '{attr}' para blob: {nome_blob}",
+                        mostrar_usuario=True,
+                    )
+                    url_blob = upload_blob_file(caminho_tif, nome_blob)
+                    logger.log(
+                        NivelLog.INFO,
+                        "v2_notificar_raster",
+                        f"Notificando raster interpolado '{attr}' no storage externo.",
+                        mostrar_usuario=True,
+                    )
+                    _post_storage(
+                        "/api/v2/add_raster_interpolados",
+                        {
+                            "tipo": req.tipo,
+                            "id": req.id,
+                            "processo": processo,
+                            "atributo": attr,
+                            "campanha": rotulo_campanha,
+                            "url": url_blob,
+                            "cliente_id": req.cliente_id,
+                            "fazenda": req.fazenda,
+                            "talhao": req.talhao,
+                            "gleba": req.gleba,
+                            "profundidade": profundidade,
+                            "data": req.data,
+                        },
+                    )
+                except Exception as exc:
+                    logger.log(
+                        NivelLog.ERROR,
+                        "v2_raster_storage",
+                        f"Falha ao enviar raster interpolado: {str(exc)}",
+                        mostrar_usuario=True,
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Falha ao enviar raster interpolado para armazenamento externo.",
+                    ) from exc
+                rasters_enviados.append(
+                    RasterInterpoladoResponse(atributo=attr, url=url_blob)
+                )
+
+            if req.gerar_csv:
+                payload_grid = _montar_payload_grid_completo(req, df_final, profundidade)
+                try:
+                    logger.log(
+                        NivelLog.INFO,
+                        "v2_notificar_grid",
+                        "Enviando grid completo ao storage externo.",
+                        mostrar_usuario=True,
+                    )
+                    _post_storage("/api/v2/add_interpolacao_grid_completo", payload_grid)
+                except Exception as exc:
+                    logger.log(
+                        NivelLog.ERROR,
+                        "v2_grid_storage",
+                        f"Falha ao enviar grid completo: {str(exc)}",
+                        mostrar_usuario=True,
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Falha ao enviar grid completo para armazenamento externo.",
+                    ) from exc
+                grid_enviado = True
 
     return ProcessamentoV2Response(
         sucesso=True,

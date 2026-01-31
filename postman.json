@@ -97,7 +97,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"tipo\": \"gleba\",\n  \"id\": 123,\n  \"gerar_csv\": true,\n  \"url_kml\": \"https://exemplo.com/contorno.kml\",\n  \"url_grade\": \"https://exemplo.com/grade.gpkg\",\n  \"processo\": \"solo\",\n  \"cliente_id\": 999,\n  \"data\": \"2025-05-02\",\n  \"fazenda\": \"Fazenda Demo\",\n  \"talhao\": \"Talhão 1\",\n  \"gleba\": \"Gleba A\",\n  \"cultura\": \"Soja\",\n  \"dados\": [\n    {\n      \"latitude\": -23.55,\n      \"longitude\": -46.63,\n      \"ponto_coleta\": \"P01\",\n      \"profundidade\": \"0-20\",\n      \"atributos\": [\n        { \"nome\": \"pH H2O\", \"valor\": 5.7 },\n        { \"nome\": \"K\", \"valor\": 0.35 }\n      ]\n    }\n  ]\n}"
+          "raw": "{\n  \"tipo\": \"gleba\",\n  \"id\": 123,\n  \"gerar_csv\": true,\n  \"url_kml\": \"https://exemplo.com/contorno.kml\",\n  \"url_grade\": \"https://exemplo.com/grade.gpkg\",\n  \"processo\": \"solo\",\n  \"cliente_id\": 999,\n  \"data\": \"2025-05-02\",\n  \"fazenda\": 10,\n  \"talhao\": 20,\n  \"gleba\": 30,\n  \"cultura\": \"Soja\",\n  \"profundidade\": 1,\n  \"dados\": [\n    {\n      \"latitude\": -23.55,\n      \"longitude\": -46.63,\n      \"ponto_coleta\": \"P01\",\n      \"profundidade\": 1,\n      \"atributos\": [\n        { \"nome\": \"pH H2O\", \"valor\": 5.7 },\n        { \"nome\": \"K\", \"valor\": 0.35 }\n      ]\n    }\n  ]\n}"
         },
         "url": {
           "raw": "{{API_BASE_URL}}/v2/processar-amostragem",
