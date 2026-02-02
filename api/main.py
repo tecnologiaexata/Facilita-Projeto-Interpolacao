@@ -8,6 +8,7 @@ import tempfile
 import json
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, root_validator
 import numpy as np
 import pandas as pd
@@ -188,6 +189,13 @@ app = FastAPI(
     title="Facilita Agro API",
     description="API de processamento geoespacial para dados agrícolas (amostragem e produtividade).",
     version="0.3.1",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # ============================================================
