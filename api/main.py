@@ -7,7 +7,7 @@ import re
 import tempfile
 import json
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, root_validator
 import numpy as np
@@ -197,6 +197,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.options("/{path:path}")
+def options_preflight_handler(path: str) -> Response:
+    return Response(status_code=204)
 
 # ============================================================
 # Helpers
