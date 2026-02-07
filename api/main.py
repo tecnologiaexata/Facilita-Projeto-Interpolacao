@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 import json
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +14,7 @@ from pydantic import BaseModel, Field, root_validator
 import numpy as np
 import pandas as pd
 import requests
+import geopandas as gpd
 
 from facilita_agro.logger import LoggerAgricola, NivelLog
 from facilita_agro.processador_lavoura import ProcessadorLavoura
@@ -181,6 +183,17 @@ class KmlGradeResponse(BaseModel):
     dados: Optional[dict] = None
 
 
+class ConverterGpkgGeoJsonRequest(BaseModel):
+    id_referencia: int
+    url: str
+
+
+class ConverterGpkgGeoJsonResponse(BaseModel):
+    sucesso: bool
+    mensagem: str
+    url_geojson: str
+
+
 # ============================================================
 # Inicialização FastAPI
 # ============================================================
@@ -289,6 +302,22 @@ def _post_storage(
         return resposta.json()
     except ValueError:
         return {"status": "ok"}
+
+
+def _baixar_arquivo_url(url: str, sufixo_padrao: str) -> Path:
+    resposta = requests.get(url, timeout=60)
+    resposta.raise_for_status()
+
+    sufixo = Path(urlparse(url).path).suffix or sufixo_padrao
+    with tempfile.NamedTemporaryFile(delete=False, suffix=sufixo) as arquivo_temp:
+        arquivo_temp.write(resposta.content)
+        return Path(arquivo_temp.name)
+
+
+def _nome_blob_geojson(url: str, id_referencia: int) -> str:
+    path = urlparse(url).path
+    base = Path(path).stem or f"referencia_{id_referencia}"
+    return _slugify_nome(f"{base}_geojson")
 
 
 def _serializar_valor(valor: Any) -> Any:
@@ -680,6 +709,87 @@ def gerenciar_grade_v2(req: GerenciarGradeV2Request):
         raise HTTPException(status_code=400, detail=msg_grade)
 
     return KmlGradeResponse(sucesso=True, mensagem=msg_grade, dados=dados_grade)
+
+
+# --------------------- V2 Converter GPKG em GeoJSON ---------------------
+
+@app.post("/v2/converterGPKGemGeoJson", response_model=ConverterGpkgGeoJsonResponse)
+def converter_gpkg_geojson(req: ConverterGpkgGeoJsonRequest):
+    logger = LoggerAgricola(f"converter_gpkg_{req.id_referencia}", salvar_arquivo=True)
+    logger.log(
+        NivelLog.INFO,
+        "v2_geojson_inicio",
+        f"Convertendo GPKG via URL: {req.url}",
+        mostrar_usuario=True,
+    )
+
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            caminho_gpkg = _baixar_arquivo_url(req.url, ".gpkg")
+            try:
+                gdf = gpd.read_file(caminho_gpkg)
+            finally:
+                caminho_gpkg.unlink(missing_ok=True)
+
+            if gdf.crs is None:
+                raise ValueError("CRS não encontrado no arquivo GPKG.")
+
+            gdf = gdf.to_crs(epsg=4326)
+
+            caminho_geojson = Path(temp_dir) / f"{_nome_blob_geojson(req.url, req.id_referencia)}.geojson"
+            gdf.to_file(caminho_geojson, driver="GeoJSON")
+
+            nome_blob = caminho_geojson.name
+            logger.log(
+                NivelLog.INFO,
+                "v2_geojson_upload",
+                f"Enviando GeoJSON para blob: {nome_blob}",
+                mostrar_usuario=True,
+            )
+            url_geojson = upload_blob_file(caminho_geojson, nome_blob)
+
+        payload = {
+            "id_referencia": req.id_referencia,
+            "url_geojson": url_geojson,
+        }
+        logger.log(
+            NivelLog.INFO,
+            "v2_geojson_notificar",
+            "Notificando GeoJSON no storage externo.",
+            mostrar_usuario=True,
+        )
+        try:
+            _post_storage(
+                "/api/v2/addGeoJson",
+                payload,
+                logger=logger,
+                log_tag="v2_payload_geojson",
+            )
+        except requests.HTTPError as exc:
+            logger.log(
+                NivelLog.WARNING,
+                "v2_geojson_notificar_erro",
+                f"Falha ao notificar storage externo: {exc}",
+                mostrar_usuario=True,
+            )
+
+    except Exception as exc:
+        logger.log(
+            NivelLog.ERROR,
+            "v2_geojson_erro",
+            f"Falha ao converter/enviar GeoJSON: {str(exc)}",
+            mostrar_usuario=True,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Falha ao converter/enviar GeoJSON.",
+        ) from exc
+
+    return ConverterGpkgGeoJsonResponse(
+        sucesso=True,
+        mensagem="GeoJSON convertido e enviado com sucesso.",
+        url_geojson=url_geojson,
+    )
 
 
 # --------------------- V2 Processar Amostragem ---------------------
