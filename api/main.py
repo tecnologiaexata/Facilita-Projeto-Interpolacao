@@ -731,6 +731,11 @@ def converter_gpkg_geojson(req: ConverterGpkgGeoJsonRequest):
             finally:
                 caminho_gpkg.unlink(missing_ok=True)
 
+            if gdf.crs is None:
+                raise ValueError("CRS não encontrado no arquivo GPKG.")
+
+            gdf = gdf.to_crs(epsg=4326)
+
             caminho_geojson = Path(temp_dir) / f"{_nome_blob_geojson(req.url, req.id_referencia)}.geojson"
             gdf.to_file(caminho_geojson, driver="GeoJSON")
 
@@ -753,12 +758,20 @@ def converter_gpkg_geojson(req: ConverterGpkgGeoJsonRequest):
             "Notificando GeoJSON no storage externo.",
             mostrar_usuario=True,
         )
-        _post_storage(
-            "/api/v2/addGeoJson",
-            payload,
-            logger=logger,
-            log_tag="v2_payload_geojson",
-        )
+        try:
+            _post_storage(
+                "/api/v2/addGeoJson",
+                payload,
+                logger=logger,
+                log_tag="v2_payload_geojson",
+            )
+        except requests.HTTPError as exc:
+            logger.log(
+                NivelLog.WARNING,
+                "v2_geojson_notificar_erro",
+                f"Falha ao notificar storage externo: {exc}",
+                mostrar_usuario=True,
+            )
 
     except Exception as exc:
         logger.log(
