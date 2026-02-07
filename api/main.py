@@ -947,9 +947,10 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
 
         rasters_enviados: list[RasterInterpoladoResponse] = []
         for attr, caminho_tif in caminhos_rasters.items():
-            nome_blob = _slugify_nome(
-                f"{req.tipo}_{req.id}_{processo}_{rotulo_campanha}_{attr}.tif"
+            nome_base = _slugify_nome(
+                f"{req.tipo}_{req.id}_{processo}_{rotulo_campanha}_{attr}"
             )
+            nome_blob = f"{nome_base}.tif"
             try:
                 logger.log(
                     NivelLog.INFO,
