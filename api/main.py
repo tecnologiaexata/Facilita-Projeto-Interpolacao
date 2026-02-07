@@ -15,6 +15,8 @@ import numpy as np
 import pandas as pd
 import requests
 import geopandas as gpd
+import rasterio
+from matplotlib import colors
 
 from facilita_agro.logger import LoggerAgricola, NivelLog
 from facilita_agro.processador_lavoura import ProcessadorLavoura
@@ -194,6 +196,18 @@ class ConverterGpkgGeoJsonResponse(BaseModel):
     url_geojson: str
 
 
+class ConverterTifPngRequest(BaseModel):
+    id_referencia: int
+    url: str
+    paleta: List[str]
+
+
+class ConverterTifPngResponse(BaseModel):
+    sucesso: bool
+    mensagem: str
+    url_png: str
+
+
 # ============================================================
 # Inicialização FastAPI
 # ============================================================
@@ -318,6 +332,65 @@ def _nome_blob_geojson(url: str, id_referencia: int) -> str:
     path = urlparse(url).path
     base = Path(path).stem or f"referencia_{id_referencia}"
     return _slugify_nome(f"{base}_geojson")
+
+
+def _nome_blob_png(url: str, id_referencia: int) -> str:
+    path = urlparse(url).path
+    base = Path(path).stem or f"referencia_{id_referencia}"
+    return _slugify_nome(f"{base}_png")
+
+
+def _validar_paleta(paleta: List[str]) -> List[str]:
+    if not paleta:
+        raise ValueError("A paleta não pode ser vazia.")
+    regex_hex = re.compile(r"^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})$")
+    paleta_limpa: List[str] = []
+    for cor in paleta:
+        cor_str = cor.strip()
+        if not regex_hex.match(cor_str):
+            raise ValueError(f"Cor inválida na paleta: '{cor}'.")
+        paleta_limpa.append(cor_str)
+    return paleta_limpa
+
+
+def _converter_tif_para_png(caminho_tif: Path, paleta: List[str], caminho_saida: Path) -> None:
+    with rasterio.open(caminho_tif) as src:
+        dados = src.read(1, masked=True)
+        if dados.mask.all():
+            raise ValueError("Raster sem pixels válidos para conversão.")
+
+        valores_validos = dados.compressed()
+        if valores_validos.size == 0:
+            raise ValueError("Raster sem pixels válidos para conversão.")
+
+        vmin = float(np.min(valores_validos))
+        vmax = float(np.max(valores_validos))
+        if vmin == vmax:
+            vmax = vmin + 1.0
+
+        colormap = colors.LinearSegmentedColormap.from_list(
+            "custom_palette",
+            paleta,
+            N=len(paleta),
+        )
+        normalizador = colors.Normalize(vmin=vmin, vmax=vmax)
+
+        rgba = colormap(normalizador(dados.filled(vmin)))
+        rgba[..., 3] = np.where(dados.mask, 0.0, rgba[..., 3])
+        rgba_uint8 = (rgba * 255).astype(np.uint8)
+
+        height, width = dados.shape
+        with rasterio.open(
+            caminho_saida,
+            "w",
+            driver="PNG",
+            width=width,
+            height=height,
+            count=4,
+            dtype="uint8",
+        ) as dst:
+            for idx in range(4):
+                dst.write(rgba_uint8[:, :, idx], idx + 1)
 
 
 def _serializar_valor(valor: Any) -> Any:
@@ -789,6 +862,85 @@ def converter_gpkg_geojson(req: ConverterGpkgGeoJsonRequest):
         sucesso=True,
         mensagem="GeoJSON convertido e enviado com sucesso.",
         url_geojson=url_geojson,
+    )
+
+
+# --------------------- V2 Converter TIF em PNG ---------------------
+
+@app.post("/v2/converterTifemPng", response_model=ConverterTifPngResponse)
+def converter_tif_png(req: ConverterTifPngRequest):
+    logger = LoggerAgricola(f"converter_tif_{req.id_referencia}", salvar_arquivo=True)
+    logger.log(
+        NivelLog.INFO,
+        "v2_tif_inicio",
+        f"Convertendo TIF via URL: {req.url}",
+        mostrar_usuario=True,
+    )
+
+    try:
+        paleta = _validar_paleta(req.paleta)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            caminho_tif = _baixar_arquivo_url(req.url, ".tif")
+            try:
+                caminho_png = Path(temp_dir) / f"{_nome_blob_png(req.url, req.id_referencia)}.png"
+                _converter_tif_para_png(caminho_tif, paleta, caminho_png)
+            finally:
+                caminho_tif.unlink(missing_ok=True)
+
+            nome_blob = caminho_png.name
+            logger.log(
+                NivelLog.INFO,
+                "v2_tif_upload",
+                f"Enviando PNG para blob: {nome_blob}",
+                mostrar_usuario=True,
+            )
+            url_png = upload_blob_file(caminho_png, nome_blob)
+
+        payload = {
+            "id_referencia": req.id_referencia,
+            "url": url_png,
+        }
+        logger.log(
+            NivelLog.INFO,
+            "v2_tif_notificar",
+            "Notificando PNG no storage externo.",
+            mostrar_usuario=True,
+        )
+        try:
+            _post_storage(
+                "/api/v2/addPNGdoTif",
+                payload,
+                logger=logger,
+                log_tag="v2_payload_png",
+            )
+        except requests.HTTPError as exc:
+            logger.log(
+                NivelLog.WARNING,
+                "v2_tif_notificar_erro",
+                f"Falha ao notificar storage externo: {exc}",
+                mostrar_usuario=True,
+            )
+
+    except Exception as exc:
+        logger.log(
+            NivelLog.ERROR,
+            "v2_tif_erro",
+            f"Falha ao converter/enviar PNG: {str(exc)}",
+            mostrar_usuario=True,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Falha ao converter/enviar PNG.",
+        ) from exc
+
+    return ConverterTifPngResponse(
+        sucesso=True,
+        mensagem="PNG convertido e enviado com sucesso.",
+        url_png=url_png,
     )
 
 
