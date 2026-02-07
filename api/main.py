@@ -17,6 +17,7 @@ import requests
 import geopandas as gpd
 import rasterio
 from matplotlib import colors
+from scipy.ndimage import gaussian_filter
 
 from facilita_agro.logger import LoggerAgricola, NivelLog
 from facilita_agro.processador_lavoura import ProcessadorLavoura
@@ -377,6 +378,8 @@ def _converter_tif_para_png(caminho_tif: Path, paleta: List[str], caminho_saida:
 
         rgba = colormap(normalizador(dados.filled(vmin)))
         rgba[..., 3] = np.where(dados.mask, 0.0, rgba[..., 3])
+        alpha_suavizado = gaussian_filter(rgba[..., 3], sigma=1)
+        rgba[..., 3] = np.clip(alpha_suavizado, 0.0, 1.0)
         rgba_uint8 = (rgba * 255).astype(np.uint8)
 
         height, width = dados.shape
