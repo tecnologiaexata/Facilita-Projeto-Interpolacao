@@ -92,13 +92,26 @@ class ProcessadorLavoura:
 
         return dados
 
-    def _atualizar_kml_grade(self, tipo: str, identificador: int, url_grade: str) -> None:
+    def _atualizar_kml_grade(
+        self,
+        tipo: str,
+        identificador: int,
+        id_amostragem: int,
+        safra: str,
+        url_grade: str,
+    ) -> None:
         """Envia ao front a URL pública da grade para correlação."""
         base_url = os.getenv("FACILITAGRO_FRONTEND_BASE_URL", "https://facilitagro.com.br")
         endpoint = f"{base_url.rstrip('/')}/api/v2/atualizarKmlGrade"
         resposta = requests.post(
             endpoint,
-            json={"tipo": tipo, "id": identificador, "url_grade": url_grade},
+            json={
+                "tipo": tipo,
+                "id": identificador,
+                "id_amostragem": id_amostragem,
+                "safra": safra,
+                "url_grade": url_grade,
+            },
             timeout=30,
         )
         resposta.raise_for_status()
@@ -298,6 +311,8 @@ class ProcessadorLavoura:
         self,
         tipo: str,
         identificador: int,
+        id_amostragem: int,
+        safra: str,
         url_kml: str,
         url_grade: Optional[str] = None,
     ) -> Tuple[bool, str, Dict[str, Any]]:
@@ -345,7 +360,7 @@ class ProcessadorLavoura:
 
                 nome_arquivo = f"{tipo}_{identificador}_grade.gpkg"
                 url_grade_publica = self._upload_grade_blob(caminho_grade, nome_arquivo)
-                self._atualizar_kml_grade(tipo, identificador, url_grade_publica)
+                self._atualizar_kml_grade(tipo, identificador, id_amostragem, safra, url_grade_publica)
 
             self.url_grade = url_grade_publica
 
