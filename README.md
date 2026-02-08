@@ -150,3 +150,13 @@ Saída:
 - Yield multi-colhedora suportado
 - Grid completo consistente
 - Docker-ready
+
+
+
+```
+docker compose stop facilita
+docker compose rm -f facilita
+docker compose build --no-cache facilita
+docker compose up -d facilita
+docker compose logs -f --tail=200 facilita
+```
