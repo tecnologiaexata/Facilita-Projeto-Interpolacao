@@ -117,6 +117,8 @@ class DadoAmostraV2(BaseModel):
 class ProcessarAmostragemV2Request(BaseModel):
     tipo: Literal["gleba", "talhao"]
     id: int
+    id_amostragem: int
+    safra: str
     gerar_csv: bool = Field(default=True, description="Se True, envia dados do grid completo.")
     url_kml: str
     url_grade: str
@@ -169,6 +171,8 @@ class ChecarPerimetroV2Request(BaseModel):
 class GerenciarGradeV2Request(BaseModel):
     tipo: Literal["talhao", "gleba"] = Field(..., description="Tipo de área.")
     id: int = Field(..., description="Identificador da área.")
+    id_amostragem: int = Field(..., description="Identificador da amostragem.")
+    safra: str = Field(..., description="Safra (ex.: 2024/2025).")
     url_kml: Optional[str] = Field(
         default=None,
         description="URL do KML. Se omitido, será consultado via endpoint do front.",
@@ -443,6 +447,8 @@ def _montar_payload_grid_completo(
         "tipo": req.tipo,
         "id": req.id,
         "processo": req.processo,
+        "id_amostragem": req.id_amostragem,
+        "safra": req.safra,
         "cliente_id": req.cliente_id,
         "data": req.data,
         "fazenda": req.fazenda,
@@ -775,6 +781,8 @@ def gerenciar_grade_v2(req: GerenciarGradeV2Request):
     ok_grade, msg_grade, dados_grade = processador.gerenciar_gradeV2(
         req.tipo,
         req.id,
+        req.id_amostragem,
+        req.safra,
         url_kml,
         url_grade,
     )
@@ -986,6 +994,8 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
     ok_grade, msg_grade, _ = proc_lav.gerenciar_gradeV2(
         req.tipo,
         req.id,
+        req.id_amostragem,
+        req.safra,
         req.url_kml,
         req.url_grade,
     )
@@ -1120,6 +1130,8 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
                     "atributo": attr,
                     "campanha": rotulo_campanha,
                     "url": url_blob,
+                    "id_amostragem": req.id_amostragem,
+                    "safra": req.safra,
                     "cliente_id": req.cliente_id,
                     "data": req.data,
                     "fazenda": req.fazenda,
