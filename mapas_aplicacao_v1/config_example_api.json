@@ -1,0 +1,32 @@
+{
+  "meta": { "field_name": "pivo3" },
+  "recommendation": {
+    "selection": ["calcario"],
+    "params": {
+      "calcario": { "V_desejado": 90, "PRNT": 75 }
+    }
+  },
+  "processing": {
+    "grid": { "pixel_size_m": 10 },
+    "rate_limits": {
+      "unit": "t/ha",
+      "min": 1.0,
+      "max": 6.0,
+      "round_step": 0.5,
+      "round_mode": "nearest"
+    },
+    "outside_buffer": {
+      "enabled": true,
+      "width_m": 10,
+      "mode": "nearest",
+      "fixed_rate": { "unit": "t/ha", "value": null }
+    }
+  },
+  "interpolation": { "method": "auto" },
+  "export": {
+    "format": "all",
+    "output_package": { "name_prefix": "export_final" }
+  },
+  "outputs": { "keep_intermediate": false },
+  "report": { "enabled": true, "info": { "fazenda": "Teste", "talhao": "pivo3" } }
+}

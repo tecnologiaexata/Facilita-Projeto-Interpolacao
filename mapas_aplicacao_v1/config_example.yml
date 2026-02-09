@@ -1,0 +1,95 @@
+project:
+  name: "mapas_aplicacao"
+  version: "0.1"
+  crs_out: "auto"
+  units:
+    rate: "kg/ha"      # fallback; o unit-aware real está em processing.rate_limits.unit
+    pixel: "m"
+
+inputs:
+  field_boundary:
+    format: "kml"
+    path: "data/contornos/pivo3.kml"
+    layer: null
+
+  soil_table:
+    format: "auto"
+    path: "data/amostragem/pivo3.csv"
+    x_col: "x"
+    y_col: "y"
+    id_col: null
+    delimiter: ","
+    decimal: "."
+    encoding: "utf-8"
+
+processing:
+  grid:
+    pixel_size_m: 10
+    snap_to_boundary: true
+
+  masking:
+    nodata_value: -9999
+    clip_to_boundary: true
+
+  # unit-aware (API-friendly)
+  rate_limits:
+    unit: "t/ha"
+    min: 0.5
+    max: 8.0
+    round_step: 0.5
+    round_mode: "nearest"
+
+  outside_buffer:
+    enabled: true
+    width_m: 10
+    mode: "nearest"     # "fixed" | "zero" | "nearest"
+    fixed_rate:
+      unit: "t/ha"
+      value: null       # obrigatório se mode="fixed"
+
+interpolation:
+  method: "kriging"           # "auto" | "idw" | "kriging"
+  idw:
+    power: 2.0
+    neighbors: 12
+    max_distance_m: null
+
+recommendation:
+  selection: ["calcario"]     # ["calcario", ...]
+  params:
+    calcario:
+      V_desejado: 90
+      PRNT: 75
+  missing_variables: "error"
+  missing_params: "error"
+
+# knobs que o pipeline agora respeita de verdade
+postprocess:
+  geometry:
+    simplify_tolerance_m: 0.0
+    min_polygon_area_ha: 0.5
+    merge_small_mode: "largest_area"   # "largest_area" | "largest_shared_border"
+  metadata_fields:
+    add_fields: true
+
+export:
+  format: "all"
+  output_package:
+    enabled: true
+    type: "zip"
+    name_prefix: "export_final"   # controla o nome da pasta e do zip final
+
+report:
+  enabled: true
+  format: "pdf"
+  info: {}   # se quiser, pode mandar dados para o PDF via API
+
+logging:
+  level: "INFO"
+  structured: true
+  save_to_file: true
+  folder: "logs"
+
+outputs:
+  folder: "outputs"
+  keep_intermediate: false

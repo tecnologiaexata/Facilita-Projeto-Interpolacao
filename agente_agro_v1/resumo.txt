@@ -1,0 +1,167 @@
+RESUMO TÉCNICO — PROJETO 2
+INTELIGÊNCIA AGRONÔMICA (FACILITA AGRO)
+
+Contexto geral
+O projeto Facilita Agro já dispõe de um pipeline capaz de importar, filtrar e interpolar dados espaciais de diferentes origens, consolidando os resultados em um grid espacial padronizado (grid_completo.csv), que concentra o histórico completo de camadas de dados por lavoura.
+
+Este projeto utiliza esse grid como base para o desenvolvimento de um framework de inteligência agronômica observacional, voltado à análise técnica de dados históricos de lavoura e à geração de sugestões guiadas de manejo, com forte ênfase em rastreabilidade, conservadorismo analítico e interpretabilidade.
+
+As análises e recomendações são baseadas em dados observacionais e não implicam inferência causal. Os resultados devem ser interpretados com apoio técnico-profissional, respeitando as limitações inerentes aos dados de campo e aos processos de amostragem comercial.
+
+
+Conceito central
+Criar um framework modular de análise que explore o histórico consolidado no grid_completo.csv para:
+
+- identificar padrões relevantes de variabilidade produtiva;
+- extrair relações interpretáveis entre atributos de solo e produtividade;
+- qualificar a robustez e estabilidade dessas relações;
+- filtrar relações espúrias ou pouco confiáveis;
+- traduzir evidências consistentes em sugestões guiadas de manejo;
+- garantir rastreabilidade completa do processo analítico e decisório.
+
+
+Arquitetura interna do Agente de Inteligência Agronômica
+
+observability.py
+Responsável pela observabilidade do pipeline. Centraliza:
+- geração de run_id;
+- identificação de talhão como unidade máxima de rastreabilidade;
+- registro estruturado de decisões, métricas e warnings;
+- exportação de auditorias em JSON, segregadas por etapa e execução.
+
+Este módulo garante reprodutibilidade, transparência e auditabilidade completa do processo analítico.
+
+
+io_checks.py
+Responsável pela importação e checagens iniciais do grid_completo.csv.
+
+Principais responsabilidades:
+- validação da existência da variável-alvo (produtividade);
+- verificação mínima de variabilidade da produtividade (std e CV);
+- identificação de processos disponíveis (ex.: solo, foliar, compactação);
+- seleção inicial de variáveis numéricas potencialmente informativas;
+- checagens leves de integridade do arquivo (sem redundância com outros pipelines).
+
+Este módulo atua como um gate objetivo de entrada, evitando análises sobre dados degradados ou inadequados.
+
+
+safety_quality.py
+Aplica filtros de segurança analítica, sem alterar os dados originais.
+
+Funções principais:
+- remoção de variáveis sem variabilidade (ex.: unique ≤ 3);
+- caracterização das variáveis como espaciais, temporais ou mistas;
+- detecção robusta de outliers via modified z-score (MAD), apenas para flag e registro;
+- geração de warnings explícitos, registrados integralmente no audit;
+- preparação do conjunto final de variáveis elegíveis para análise.
+
+Nenhum dado é imputado, suavizado ou corrigido. Apenas os valores reais são utilizados ao longo de todo o processo.
+
+
+collinearity.py
+Executa análise conservadora de redundância informacional entre variáveis explicativas.
+
+Características:
+- correlação não-paramétrica como padrão;
+- threshold elevado (|ρ| ≥ 0.90);
+- clusterização via componentes conexas de um grafo de correlação;
+- tratamento simétrico de correlações positivas e negativas;
+- exclusão de variáveis temporais do clustering (reservadas para análises futuras);
+- seleção de 1 variável representante por cluster, baseada em:
+  - menor missingness,
+  - menor incidência de outliers,
+  - tipo da variável (mixed > spatial),
+  - maior IQR (como critério de desempate).
+
+As variáveis não selecionadas não são descartadas, apenas agrupadas na modelagem principal, mantendo-se disponíveis para interpretação e relatório.
+
+
+insight_engine.py 
+Núcleo analítico do sistema.
+
+Objetivo:
+- identificar relações observacionais robustas entre atributos e produtividade;
+- explorar gradientes, rankings condicionais e contrastes entre classes de produtividade;
+- avaliar estabilidade espacial das relações;
+- consolidar evidências interpretáveis, com limitações explícitas.
+
+Este módulo é desenhado para lidar com dados comerciais reais, incluindo amostragem esparsa e possível estrutura espacial degradada.
+
+
+temporal_engine.py 
+Núcleo analítico do sistema quando houver mais de uma safra disponível.
+
+Objetivo (mesmos do insight_engine, mas incorporando consistência temporal)
+- identificar relações observacionais robustas entre atributos e produtividade;
+- explorar gradientes, rankings condicionais e contrastes entre classes de produtividade;
+- avaliar estabilidade espacial e temporal das relações;
+- consolidar evidências interpretáveis, com limitações explícitas.
+
+
+recommendation_engine.py
+Transforma evidências validadas em sugestões guiadas de manejo, aplicando:
+- critérios conservadores de aceitação;
+- mensagens explícitas de cautela técnica;
+- resolução de sinais conflitantes;
+- registro completo do caminho lógico da recomendação.
+
+Não prescreve manejos automáticos.
+
+
+reporting.py
+Organiza as saídas analíticas para:
+- consumo humano;
+- integração via API;
+- geração de mensagens técnicas e resumo.
+
+
+runner.py
+Orquestra a execução completa do pipeline, controlando:
+- sequência das etapas;
+- reaproveitamento de resultados intermediários;
+- integração com o sistema de observabilidade.
+
+
+api.py
+Expõe o agente como serviço, mantendo separação clara entre:
+- lógica analítica;
+- interface de consumo pela plataforma Facilita Agro.
+
+
+Estrutura de diretórios
+
+agente_agro/
+│
+├── api/
+│   ├── __init__.py
+│   └── main.py
+│
+├── pipelines/
+│   ├── observability.py
+│   ├── io_checks.py
+│   ├── safety_quality.py
+│   ├── collinearity.py
+│   ├── insight_engine.py
+│   ├── temporal_engine.py
+│   ├── recommendation_engine.py
+│   ├── reporting.py
+│   └── runner.py
+│
+├── data/
+├── outputs/
+├── audit/
+├── Dockerfile
+├── pyproject.toml
+├── README.md
+└── resumo.txt
+
+
+
+
+
+
+
+
+
+
+
