@@ -1,5 +1,0 @@
-[project]
-name = "mapas-aplicacao"
-version = "0.1.0"
-description = "API e pipeline para geração de mapas de aplicação."
-requires-python = ">=3.11"
