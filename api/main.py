@@ -144,6 +144,51 @@ class ProcessarAmostragemV2Request(BaseModel):
         return values
 
 
+class RateLimitsConfig(BaseModel):
+    unit: Optional[str] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+    round_step: Optional[float] = None
+    round_mode: Literal["nearest"] = "nearest"
+
+
+class OutsideBufferConfig(BaseModel):
+    enabled: bool = True
+    width_m: float = 10.0
+    mode: Literal["nearest"] = "nearest"
+
+
+class ProcessingConfigV2Run(BaseModel):
+    rate_limits: Optional[RateLimitsConfig] = None
+    outside_buffer: Optional[OutsideBufferConfig] = None
+
+
+class DadoRunV2(BaseModel):
+    x: float
+    y: float
+    valor: float
+
+
+class RunV2Request(BaseModel):
+    processing: Optional[ProcessingConfigV2Run] = None
+    atributos: str
+    tipo: Literal["gleba", "talhao"]
+    id: int
+    url_kml: str
+    url_grade: str
+    processo: str
+    cliente_id: Optional[int] = None
+    date: str
+    fazenda: Optional[int] = None
+    talhao: int
+    gleba: Optional[int] = None
+    cultura: Optional[str] = None
+    id_amostragem: int
+    safra: str
+    profundidade: Optional[int] = None
+    data: List[DadoRunV2]
+
+
 class RasterInterpoladoResponse(BaseModel):
     atributo: str
     url: str
@@ -404,6 +449,89 @@ def _serializar_valor(valor: Any) -> Any:
         return valor.item()
     return valor
 
+
+
+
+def _normalizar_processo_v2_run(processo: str) -> str:
+    proc = (processo or "").strip().lower()
+    aliases = {
+        "aplicacao": "solo",
+        "aplicação": "solo",
+        "solo": "solo",
+        "prod": "prod",
+        "producao": "prod",
+        "produção": "prod",
+        "compac": "compac",
+        "compactacao": "compac",
+        "compactação": "compac",
+        "nemat": "nemat",
+        "foliar": "foliar",
+    }
+    proc_norm = aliases.get(proc)
+    if proc_norm is None:
+        raise HTTPException(status_code=400, detail=f"Processo inválido: '{processo}'.")
+    return proc_norm
+
+
+def _normalizar_tipo_v2_run(tipo: str) -> str:
+    tipo_norm = (tipo or "").strip().lower()
+    if tipo_norm not in {"talhao", "gleba"}:
+        raise HTTPException(status_code=400, detail=f"Tipo inválido: '{tipo}'.")
+    return tipo_norm
+
+
+def _montar_req_processar_v2(req: RunV2Request) -> ProcessarAmostragemV2Request:
+    dados_convertidos: list[DadoAmostraV2] = []
+    for idx, item in enumerate(req.data, start=1):
+        dados_convertidos.append(
+            DadoAmostraV2(
+                latitude=item.y,
+                longitude=item.x,
+                ponto_coleta=f"P{idx}",
+                profundidade=req.profundidade,
+                atributos=[AtributoV2(nome=req.atributos, valor=item.valor)],
+            )
+        )
+
+    return ProcessarAmostragemV2Request(
+        tipo=_normalizar_tipo_v2_run(req.tipo),
+        id=req.id,
+        id_amostragem=req.id_amostragem,
+        safra=req.safra,
+        gerar_csv=True,
+        url_kml=req.url_kml,
+        url_grade=req.url_grade,
+        processo=_normalizar_processo_v2_run(req.processo),
+        cliente_id=req.cliente_id,
+        data=req.date,
+        fazenda=req.fazenda,
+        talhao=req.talhao,
+        gleba=req.gleba,
+        cultura=req.cultura,
+        profundidade=req.profundidade,
+        dados=dados_convertidos,
+    )
+
+
+def _aplicar_rate_limits_em_df(df: pd.DataFrame, atributo: str, cfg: Optional[RateLimitsConfig]) -> pd.DataFrame:
+    if cfg is None or atributo not in df.columns:
+        return df
+
+    serie = pd.to_numeric(df[atributo], errors="coerce")
+
+    if cfg.min is not None:
+        serie = serie.clip(lower=cfg.min)
+    if cfg.max is not None:
+        serie = serie.clip(upper=cfg.max)
+
+    if cfg.round_step and cfg.round_step > 0:
+        if cfg.round_mode != "nearest":
+            raise HTTPException(status_code=400, detail="round_mode inválido. Use 'nearest'.")
+        step = float(cfg.round_step)
+        serie = (np.round(serie / step) * step).astype(float)
+
+    df[atributo] = serie
+    return df
 
 def _montar_payload_grid_completo(
     req: ProcessarAmostragemV2Request,
@@ -1210,3 +1338,43 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
         rasters=rasters_enviados,
         grid_completo_enviado=grid_enviado,
     )
+
+
+@app.post("/v2/run", response_model=ProcessamentoV2Response)
+def run_v2(req: RunV2Request):
+    """
+    Compatibilidade com contrato V2/run:
+      - valida pontos dentro do KML/perímetro
+      - força distribuição/interpolação com base na grade enviada
+      - aplica rate-limits no atributo solicitado
+    """
+    req_convertido = _montar_req_processar_v2(req)
+    resp = processar_amostragem_v2(req_convertido)
+
+    if not req.processing or not req.processing.rate_limits:
+        return resp
+
+    nome_lavoura = f"{req_convertido.tipo}_{req_convertido.id}"
+    logger = LoggerAgricola(nome_lavoura, salvar_arquivo=True)
+
+    csv_dir = DIR_CSV_BASE / nome_lavoura
+    if not csv_dir.exists():
+        return resp
+
+    arquivos = sorted(csv_dir.rglob(f"*_{req_convertido.processo}_*_grid.csv"), reverse=True)
+    if not arquivos:
+        return resp
+
+    caminho_csv = arquivos[0]
+    df = pd.read_csv(caminho_csv)
+    df = _aplicar_rate_limits_em_df(df, req.atributos, req.processing.rate_limits)
+    df.to_csv(caminho_csv, index=False)
+
+    logger.log(
+        NivelLog.INFO,
+        "v2_run_rate_limits",
+        f"Rate limits aplicados no CSV final ({caminho_csv.name}) para atributo '{req.atributos}'.",
+        mostrar_usuario=True,
+    )
+
+    return resp
