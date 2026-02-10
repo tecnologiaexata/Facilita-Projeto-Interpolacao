@@ -290,16 +290,6 @@ class ProcessadorLavoura:
             try:
                 gdf_grade = gpd.read_file(arquivo_grade)
                 gdf_grade = self._validar_e_corrigir_grade(gdf_grade)
-                if gdf_grade.empty:
-                    msg = "Grade inválida: nenhum ponto da grade está dentro do perímetro do KML."
-                    self._log(NivelLog.ERROR, "gerenciar_gradeV2", msg, mostrar_usuario=True)
-                    return False, msg, {
-                        "tipo": tipo,
-                        "id": identificador,
-                        "url_kml": url_kml,
-                        "url_grade": url_grade,
-                    }
-
                 self.grade = gdf_grade
 
                 msg = f"Grade existente carregada: {len(self.grade)} pontos"
@@ -346,16 +336,6 @@ class ProcessadorLavoura:
                 gdf_grade = gpd.read_file(caminho_grade)
                 caminho_grade.unlink(missing_ok=True)
                 gdf_grade = self._validar_e_corrigir_grade(gdf_grade)
-                if gdf_grade.empty:
-                    msg = "Grade inválida: nenhum ponto da grade está dentro do perímetro do KML."
-                    self._log(NivelLog.ERROR, "gerenciar_gradeV2", msg, mostrar_usuario=True)
-                    return False, msg, {
-                        "tipo": tipo,
-                        "id": identificador,
-                        "url_kml": url_kml,
-                        "url_grade": url_grade,
-                    }
-
                 self.grade = gdf_grade
 
                 msg = f"Grade existente carregada: {len(self.grade)} pontos"
@@ -419,32 +399,7 @@ class ProcessadorLavoura:
             )
             return self._converter_poligonos_para_pontos(gdf_grade)
 
-        if self.contorno is not None:
-            if gdf_grade.crs is None:
-                gdf_grade = gdf_grade.set_crs(self.contorno.crs)
-            elif gdf_grade.crs != self.contorno.crs:
-                gdf_grade = gdf_grade.to_crs(self.contorno.crs)
-
-            geom_union = self.contorno.geometry.unary_union
-            dentro_mask = gdf_grade.geometry.within(geom_union)
-            pontos_fora = int((~dentro_mask).sum())
-            if pontos_fora > 0:
-                self._log(
-                    NivelLog.WARNING,
-                    "validar_grade",
-                    (
-                        f"Grade com {pontos_fora} pontos fora do perímetro. "
-                        "Os pontos fora foram removidos."
-                    ),
-                    mostrar_usuario=True,
-                )
-                gdf_grade = gdf_grade[dentro_mask].copy()
-
-        gdf_grade = gdf_grade.reset_index(drop=True)
-
         if "id_ponto" not in gdf_grade.columns:
-            gdf_grade["id_ponto"] = range(len(gdf_grade))
-        else:
             gdf_grade["id_ponto"] = range(len(gdf_grade))
 
         if "area_representada_ha" not in gdf_grade.columns and self.contorno is not None:
