@@ -216,11 +216,16 @@ class ConverterGpkgGeoJsonResponse(BaseModel):
 class ConverterTifPngRequest(BaseModel):
     id_referencia: int
     url: str
-    paleta: List[str]
-    palette: Optional[List[str]] = Field(
-        default=None,
-        description="Paleta opcional de cores para repasse aos endpoints externos.",
+    palette: List[str] = Field(
+        ...,
+        description="Paleta de cores em hexadecimal usada na conversão do TIF para PNG.",
     )
+
+    @root_validator(pre=True)
+    def _compatibilizar_paleta_legada(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        if values.get("palette") is None and values.get("paleta") is not None:
+            values["palette"] = values.get("paleta")
+        return values
 
 
 class ConverterTifPngResponse(BaseModel):
@@ -906,7 +911,7 @@ def converter_tif_png(req: ConverterTifPngRequest):
     )
 
     try:
-        paleta = _validar_paleta(req.paleta)
+        paleta = _validar_paleta(req.palette)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
