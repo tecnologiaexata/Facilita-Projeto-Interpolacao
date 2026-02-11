@@ -139,7 +139,36 @@ Saída:
 - `POST /yield/preprocessar-upload`
 - `POST /yield/interpolar`
 - `POST /processar-amostragem-upload`
+- `POST /v2/processar-amostragem`
 - `POST /atualizar-grid-completo`
+
+---
+
+## 🛠️ Troubleshooting do endpoint `POST /v2/processar-amostragem`
+
+Se o endpoint receber dados e **não gerar raster** para alguns tipos de processo, o comportamento esperado do backend é:
+
+1. O payload é convertido em DataFrame e os atributos são abertos dinamicamente (não há "delete" silencioso no payload bruto).
+2. O processador remove campos que **nunca são interpolados** (ex.: `Data`, `Talhão`, `Profundidade`, `Ponto`, etc.).
+3. Só ficam atributos com conteúdo numérico válido.
+4. Por fim, o pipeline prioriza os atributos oficiais por processo (`COLS_INTERPOLAVEIS`), mas também aceita atributos numéricos extras fora da lista oficial.
+
+Na prática: diferenças de nomenclatura não bloqueiam mais a interpolação, desde que o valor seja numérico válido.
+
+### Atributos aceitos para interpolação por processo
+
+- `solo`: `pH H2O`, `pH CaCl`, `pH SMP`, `P meh`, `P res`, `P total`, `Na`, `K`, `S`, `Ca`, `Mg`, `Al`, `H + Al`, `MO`, `CO`, `B`, `Cu`, `Fe`, `Mn`, `Zn`, `SB`, `t`, `T`, `V %`, `m %`, `Ca/Mg`, `Ca/K`, `Mg/K`, `(Ca+Mg)/K`, `Ca/t`, `Mg/t`, `Ca/T`, `Mg/T`, `K/T`, `(H+Al)/T`, `(Ca+Mg)/T`, `(Ca+Mg+K)/T`, `Argila`, `Silte`, `Areia Total`, `Areia Grossa`, `Areia Fina`, `Cascalho`.
+- `foliar`: `N`, `P`, `K`, `Ca`, `Mg`, `S`, `B`, `Cu`, `Fe`, `Mn`, `Zn`, `Massa Fresca`, `Massa Seca`.
+- `compac`: `Kpa`.
+- `nemat`: `Quantidade`, `U/100cc`.
+- `prod`: `Kg/Ha` (presente no pipeline, mas hoje o schema da API restringe o request para `solo|foliar|compac|nemat`).
+
+### Motivos comuns para "não gerar"
+
+- Coordenadas inválidas/vazias (`latitude`/`longitude`).
+- Pontos fora do perímetro da lavoura.
+- Atributo enviado como texto não conversível para número.
+- Em versões antigas, nome de atributo diferente da convenção podia bloquear interpolação; agora atributos numéricos extras também são aceitos.
 
 ---
 

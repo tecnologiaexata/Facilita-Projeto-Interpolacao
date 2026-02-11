@@ -292,9 +292,14 @@ class PipelineAgricola:
         processo: str,
     ) -> List[str]:
         """
-        Intersecta os atributos numéricos disponíveis (vindos do ProcessadorAmostragem)
-        com a lista oficial de colunas interpoláveis para o processo escolhido,
-        preservando a ordem definida em COLS_INTERPOLAVEIS[processo].
+        Seleciona atributos para interpolação com estratégia flexível:
+
+        1) Prioriza os atributos oficiais do processo (COLS_INTERPOLAVEIS),
+           mantendo a ordem oficial quando houver match exato.
+        2) Também inclui atributos numéricos extras recebidos no payload/CSV,
+           mesmo que não estejam na lista oficial.
+
+        Com isso, o pipeline não bloqueia interpolação por diferença de nomenclatura.
         """
         processo_key = processo.lower()
 
@@ -314,15 +319,27 @@ class PipelineAgricola:
         alvo = COLS_INTERPOLAVEIS[processo_key]
         disp_set = set(atributos_disponiveis)
 
-        selecionados = [c for c in alvo if c in disp_set]
+        oficiais_encontrados = [c for c in alvo if c in disp_set]
+        extras = [c for c in atributos_disponiveis if c not in set(oficiais_encontrados)]
+        selecionados = oficiais_encontrados + extras
 
         self._log(
             NivelLog.INFO,
             "selecionar_atributos_processo",
             f"Atributos disponíveis: {sorted(atributos_disponiveis)} | "
-            f"Alvo ({processo_key}): {alvo} | Selecionados: {selecionados}",
+            f"Oficiais ({processo_key}): {alvo} | "
+            f"Oficiais encontrados: {oficiais_encontrados} | Extras aceitos: {extras} | "
+            f"Selecionados finais: {selecionados}",
             mostrar_usuario=True,
         )
+
+        if extras:
+            self._log(
+                NivelLog.WARNING,
+                "selecionar_atributos_processo",
+                f"{len(extras)} atributos fora da lista oficial serão interpolados: {extras}",
+                mostrar_usuario=True,
+            )
 
         return selecionados
 
