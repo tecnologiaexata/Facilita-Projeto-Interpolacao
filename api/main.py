@@ -116,6 +116,7 @@ class DadoAmostraV2(BaseModel):
 
 class ProcessarAmostragemV2Request(BaseModel):
     tipo: Literal["gleba", "talhao"]
+    pallet: Optional[List[str]] = None
     id: int
     id_amostragem: int
     safra: str
@@ -445,6 +446,7 @@ def _montar_payload_grid_completo(
 
     return {
         "tipo": req.tipo,
+        "pallet": req.pallet,
         "id": req.id,
         "processo": req.processo,
         "id_amostragem": req.id_amostragem,
@@ -998,6 +1000,7 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
         req.safra,
         req.url_kml,
         req.url_grade,
+        req.pallet,
     )
     if not ok_grade:
         raise HTTPException(status_code=400, detail=msg_grade)
@@ -1125,6 +1128,7 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
                 # ✅ PAYLOAD EM VARIÁVEL + LOG COMPLETO (estilo console.log)
                 payload_raster = {
                     "tipo": req.tipo,
+                    "pallet": req.pallet,
                     "id": req.id,
                     "processo": processo,
                     "atributo": attr,

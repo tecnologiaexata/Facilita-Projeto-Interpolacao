@@ -99,6 +99,7 @@ class ProcessadorLavoura:
         id_amostragem: int,
         safra: str,
         url_grade: str,
+        pallet: Optional[List[str]] = None,
     ) -> None:
         """Envia ao front a URL pública da grade para correlação."""
         base_url = os.getenv("FACILITAGRO_FRONTEND_BASE_URL", "https://facilitagro.com.br")
@@ -111,6 +112,7 @@ class ProcessadorLavoura:
                 "id_amostragem": id_amostragem,
                 "safra": safra,
                 "url_grade": url_grade,
+                "pallet": pallet,
             },
             timeout=30,
         )
@@ -315,6 +317,7 @@ class ProcessadorLavoura:
         safra: str,
         url_kml: str,
         url_grade: Optional[str] = None,
+        pallet: Optional[List[str]] = None,
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Gerencia grade via URL. Se url_grade existir, valida; senão cria, envia ao blob
@@ -360,7 +363,14 @@ class ProcessadorLavoura:
 
                 nome_arquivo = f"{tipo}_{identificador}_grade.gpkg"
                 url_grade_publica = self._upload_grade_blob(caminho_grade, nome_arquivo)
-                self._atualizar_kml_grade(tipo, identificador, id_amostragem, safra, url_grade_publica)
+                self._atualizar_kml_grade(
+                    tipo,
+                    identificador,
+                    id_amostragem,
+                    safra,
+                    url_grade_publica,
+                    pallet,
+                )
 
             self.url_grade = url_grade_publica
 
