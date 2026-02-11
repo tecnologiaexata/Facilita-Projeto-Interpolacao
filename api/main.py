@@ -116,7 +116,7 @@ class DadoAmostraV2(BaseModel):
 
 class ProcessarAmostragemV2Request(BaseModel):
     tipo: Literal["gleba", "talhao"]
-    pallet: Optional[List[str]] = None
+    palette: Optional[List[str]] = None
     id: int
     id_amostragem: int
     safra: str
@@ -167,6 +167,10 @@ class GridCompletoResponse(BaseModel):
 class ChecarPerimetroV2Request(BaseModel):
     tipo: Literal["talhao", "gleba"] = Field(..., description="Tipo de área.")
     id: int = Field(..., description="Identificador da área.")
+    palette: Optional[List[str]] = Field(
+        default=None,
+        description="Paleta opcional de cores para repasse aos endpoints externos.",
+    )
 
 
 class GerenciarGradeV2Request(BaseModel):
@@ -174,6 +178,10 @@ class GerenciarGradeV2Request(BaseModel):
     id: int = Field(..., description="Identificador da área.")
     id_amostragem: int = Field(..., description="Identificador da amostragem.")
     safra: str = Field(..., description="Safra (ex.: 2024/2025).")
+    palette: Optional[List[str]] = Field(
+        default=None,
+        description="Paleta opcional de cores para repasse aos endpoints externos.",
+    )
     url_kml: Optional[str] = Field(
         default=None,
         description="URL do KML. Se omitido, será consultado via endpoint do front.",
@@ -193,6 +201,10 @@ class KmlGradeResponse(BaseModel):
 class ConverterGpkgGeoJsonRequest(BaseModel):
     id_referencia: int
     url: str
+    palette: Optional[List[str]] = Field(
+        default=None,
+        description="Paleta opcional de cores para repasse aos endpoints externos.",
+    )
 
 
 class ConverterGpkgGeoJsonResponse(BaseModel):
@@ -205,6 +217,10 @@ class ConverterTifPngRequest(BaseModel):
     id_referencia: int
     url: str
     paleta: List[str]
+    palette: Optional[List[str]] = Field(
+        default=None,
+        description="Paleta opcional de cores para repasse aos endpoints externos.",
+    )
 
 
 class ConverterTifPngResponse(BaseModel):
@@ -446,7 +462,7 @@ def _montar_payload_grid_completo(
 
     return {
         "tipo": req.tipo,
-        "pallet": req.pallet,
+        "palette": req.palette,
         "id": req.id,
         "processo": req.processo,
         "id_amostragem": req.id_amostragem,
@@ -753,7 +769,7 @@ def checar_perimetro_v2(req: ChecarPerimetroV2Request):
         logger=logger,
     )
 
-    ok, msg, dados = processador.checar_perimetroV2(req.tipo, req.id)
+    ok, msg, dados = processador.checar_perimetroV2(req.tipo, req.id, req.palette)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
 
@@ -770,7 +786,7 @@ def gerenciar_grade_v2(req: GerenciarGradeV2Request):
         logger=logger,
     )
 
-    ok, msg, dados = processador.checar_perimetroV2(req.tipo, req.id)
+    ok, msg, dados = processador.checar_perimetroV2(req.tipo, req.id, req.palette)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
 
@@ -787,6 +803,7 @@ def gerenciar_grade_v2(req: GerenciarGradeV2Request):
         req.safra,
         url_kml,
         url_grade,
+        req.palette,
     )
     if not ok_grade:
         raise HTTPException(status_code=400, detail=msg_grade)
@@ -834,6 +851,7 @@ def converter_gpkg_geojson(req: ConverterGpkgGeoJsonRequest):
         payload = {
             "id_referencia": req.id_referencia,
             "url_geojson": url_geojson,
+            "palette": req.palette,
         }
         logger.log(
             NivelLog.INFO,
@@ -913,6 +931,7 @@ def converter_tif_png(req: ConverterTifPngRequest):
         payload = {
             "id_referencia": req.id_referencia,
             "url": url_png,
+            "palette": req.palette,
         }
         logger.log(
             NivelLog.INFO,
@@ -1000,7 +1019,7 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
         req.safra,
         req.url_kml,
         req.url_grade,
-        req.pallet,
+        req.palette,
     )
     if not ok_grade:
         raise HTTPException(status_code=400, detail=msg_grade)
@@ -1128,7 +1147,7 @@ def processar_amostragem_v2(req: ProcessarAmostragemV2Request):
                 # ✅ PAYLOAD EM VARIÁVEL + LOG COMPLETO (estilo console.log)
                 payload_raster = {
                     "tipo": req.tipo,
-                    "pallet": req.pallet,
+                    "palette": req.palette,
                     "id": req.id,
                     "processo": processo,
                     "atributo": attr,

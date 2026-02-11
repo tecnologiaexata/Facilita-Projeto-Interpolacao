@@ -75,13 +75,18 @@ class ProcessadorLavoura:
             arquivo_temp.write(resposta.content)
             return Path(arquivo_temp.name)
 
-    def _consultar_kml_grade(self, tipo: str, identificador: int) -> Dict[str, Any]:
+    def _consultar_kml_grade(
+        self,
+        tipo: str,
+        identificador: int,
+        palette: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Consulta o endpoint do front para obter URLs do KML e grade."""
         base_url = os.getenv("FACILITAGRO_FRONTEND_BASE_URL", "https://facilitagro.com.br")
         endpoint = f"{base_url.rstrip('/')}/api/v2/consultarKmlGrade"
         resposta = requests.post(
             endpoint,
-            json={"tipo": tipo, "id": identificador},
+            json={"tipo": tipo, "id": identificador, "palette": palette},
             timeout=30,
         )
         resposta.raise_for_status()
@@ -99,7 +104,7 @@ class ProcessadorLavoura:
         id_amostragem: int,
         safra: str,
         url_grade: str,
-        pallet: Optional[List[str]] = None,
+        palette: Optional[List[str]] = None,
     ) -> None:
         """Envia ao front a URL pública da grade para correlação."""
         base_url = os.getenv("FACILITAGRO_FRONTEND_BASE_URL", "https://facilitagro.com.br")
@@ -112,7 +117,7 @@ class ProcessadorLavoura:
                 "id_amostragem": id_amostragem,
                 "safra": safra,
                 "url_grade": url_grade,
-                "pallet": pallet,
+                "palette": palette,
             },
             timeout=30,
         )
@@ -186,13 +191,18 @@ class ProcessadorLavoura:
             self._log(NivelLog.ERROR, "checar_perimetro", msg, mostrar_usuario=True)
             return False, msg
 
-    def checar_perimetroV2(self, tipo: str, identificador: int) -> Tuple[bool, str, Dict[str, Any]]:
+    def checar_perimetroV2(
+        self,
+        tipo: str,
+        identificador: int,
+        palette: Optional[List[str]] = None,
+    ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Verifica e importa o perímetro da lavoura via URL de KML (KML em 4326 → UTM).
         Consulta o endpoint do front com tipo/id para obter url_kml/url_grade.
         """
         try:
-            dados = self._consultar_kml_grade(tipo, identificador)
+            dados = self._consultar_kml_grade(tipo, identificador, palette)
             url_kml = dados.get("url_kml")
             url_grade = dados.get("url_grade")
 
@@ -317,7 +327,7 @@ class ProcessadorLavoura:
         safra: str,
         url_kml: str,
         url_grade: Optional[str] = None,
-        pallet: Optional[List[str]] = None,
+        palette: Optional[List[str]] = None,
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
         Gerencia grade via URL. Se url_grade existir, valida; senão cria, envia ao blob
@@ -369,7 +379,7 @@ class ProcessadorLavoura:
                     id_amostragem,
                     safra,
                     url_grade_publica,
-                    pallet,
+                    palette,
                 )
 
             self.url_grade = url_grade_publica
