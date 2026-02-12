@@ -944,7 +944,7 @@ def converter_tif_png(req: ConverterTifPngRequest):
         payload = {
             "id_referencia": req.id_referencia,
             "url": url_png,
-            "palette": req.palette,
+            "ranges_palette": ranges_palette,
         }
         logger.log(
             NivelLog.INFO,
