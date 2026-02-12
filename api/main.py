@@ -232,6 +232,7 @@ class ConverterTifPngResponse(BaseModel):
     sucesso: bool
     mensagem: str
     url_png: str
+    ranges_palette: List[dict]
 
 
 # ============================================================
@@ -379,7 +380,7 @@ def _validar_paleta(paleta: List[str]) -> List[str]:
     return paleta_limpa
 
 
-def _converter_tif_para_png(caminho_tif: Path, paleta: List[str], caminho_saida: Path) -> None:
+def _converter_tif_para_png(caminho_tif: Path, paleta: List[str], caminho_saida: Path) -> List[dict]:
     with rasterio.open(caminho_tif) as src:
         dados = src.read(1, masked=True)
         if dados.mask.all():
@@ -394,14 +395,11 @@ def _converter_tif_para_png(caminho_tif: Path, paleta: List[str], caminho_saida:
         if vmin == vmax:
             vmax = vmin + 1.0
 
-        colormap = colors.LinearSegmentedColormap.from_list(
-            "custom_palette",
-            paleta,
-            N=len(paleta),
-        )
-        normalizador = colors.Normalize(vmin=vmin, vmax=vmax)
+        limites = np.linspace(vmin, vmax, len(paleta) + 1)
+        colormap = colors.ListedColormap(paleta, name="custom_palette")
 
-        rgba = colormap(normalizador(dados.filled(vmin)))
+        indices = np.digitize(dados.filled(vmin), limites[1:-1], right=False)
+        rgba = colormap(indices)
         rgba[..., 3] = np.where(dados.mask, 0.0, rgba[..., 3])
         rgba_uint8 = (rgba * 255).astype(np.uint8)
 
@@ -417,6 +415,16 @@ def _converter_tif_para_png(caminho_tif: Path, paleta: List[str], caminho_saida:
         ) as dst:
             for idx in range(4):
                 dst.write(rgba_uint8[:, :, idx], idx + 1)
+
+    ranges_palette = [
+        {
+            "color": cor,
+            "range_min": float(limites[idx]),
+            "range_max": float(limites[idx + 1]),
+        }
+        for idx, cor in enumerate(paleta)
+    ]
+    return ranges_palette
 
 
 def _serializar_valor(valor: Any) -> Any:
@@ -920,7 +928,7 @@ def converter_tif_png(req: ConverterTifPngRequest):
             caminho_tif = _baixar_arquivo_url(req.url, ".tif")
             try:
                 caminho_png = Path(temp_dir) / f"{_nome_blob_png(req.url, req.id_referencia)}.png"
-                _converter_tif_para_png(caminho_tif, paleta, caminho_png)
+                ranges_palette = _converter_tif_para_png(caminho_tif, paleta, caminho_png)
             finally:
                 caminho_tif.unlink(missing_ok=True)
 
@@ -936,7 +944,7 @@ def converter_tif_png(req: ConverterTifPngRequest):
         payload = {
             "id_referencia": req.id_referencia,
             "url": url_png,
-            "palette": req.palette,
+            "ranges_palette": ranges_palette,
         }
         logger.log(
             NivelLog.INFO,
@@ -975,6 +983,7 @@ def converter_tif_png(req: ConverterTifPngRequest):
         sucesso=True,
         mensagem="PNG convertido e enviado com sucesso.",
         url_png=url_png,
+        ranges_palette=ranges_palette,
     )
 
 
