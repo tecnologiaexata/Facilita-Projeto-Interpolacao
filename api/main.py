@@ -16,7 +16,9 @@ import pandas as pd
 import requests
 import geopandas as gpd
 import rasterio
+from rasterio.features import rasterize
 from matplotlib import colors
+from scipy import ndimage
 
 from facilita_agro.logger import LoggerAgricola, NivelLog
 from facilita_agro.processador_lavoura import ProcessadorLavoura
@@ -220,6 +222,22 @@ class ConverterTifPngRequest(BaseModel):
         ...,
         description="Paleta de cores em hexadecimal usada na conversão do TIF para PNG.",
     )
+    url_kml: Optional[str] = Field(
+        default=None,
+        description="URL opcional do KML para recorte por polígono com transparência fora do talhão.",
+    )
+    expand_percent: float = Field(
+        default=1.5,
+        ge=0.0,
+        le=20.0,
+        description="Percentual de expansão do polígono antes do recorte (ex.: 1.5).",
+    )
+    feather_pixels: int = Field(
+        default=1,
+        ge=0,
+        le=20,
+        description="Suavização de borda em pixels aplicada no alpha da máscara.",
+    )
 
     @root_validator(pre=True)
     def _compatibilizar_paleta_legada(cls, values: Dict[str, Any]) -> Dict[str, Any]:
@@ -380,7 +398,68 @@ def _validar_paleta(paleta: List[str]) -> List[str]:
     return paleta_limpa
 
 
-def _converter_tif_para_png(caminho_tif: Path, paleta: List[str], caminho_saida: Path) -> List[dict]:
+def _carregar_mascara_kml(
+    caminho_kml: Path,
+    crs_raster: Any,
+    transform: Any,
+    shape: tuple[int, int],
+    expand_percent: float,
+) -> np.ndarray:
+    gdf_kml = gpd.read_file(caminho_kml)
+    if gdf_kml.empty:
+        raise ValueError("KML sem feições válidas para recorte.")
+
+    gdf_kml = gdf_kml[gdf_kml.geometry.notnull()]
+    gdf_kml = gdf_kml[~gdf_kml.geometry.is_empty]
+    if gdf_kml.empty:
+        raise ValueError("KML sem geometrias válidas para recorte.")
+
+    if gdf_kml.crs is None:
+        gdf_kml = gdf_kml.set_crs(epsg=4326)
+
+    gdf_kml = gdf_kml.to_crs(crs_raster)
+    geometria_unificada = gdf_kml.geometry.union_all()
+    if geometria_unificada is None or geometria_unificada.is_empty:
+        raise ValueError("Não foi possível obter o polígono de recorte do KML.")
+
+    if expand_percent > 0:
+        minx, miny, maxx, maxy = geometria_unificada.bounds
+        referencia = max(maxx - minx, maxy - miny)
+        distancia_buffer = referencia * (expand_percent / 100.0)
+        if distancia_buffer > 0:
+            geometria_unificada = geometria_unificada.buffer(distancia_buffer)
+
+    mascara = rasterize(
+        [(geometria_unificada, 1)],
+        out_shape=shape,
+        transform=transform,
+        fill=0,
+        all_touched=True,
+        dtype="uint8",
+    )
+    return mascara.astype(bool)
+
+
+def _aplicar_feather_alpha(alpha: np.ndarray, mascara: np.ndarray, feather_pixels: int) -> np.ndarray:
+    if feather_pixels <= 0:
+        alpha[~mascara] = 0
+        return alpha
+
+    distancia_interna = ndimage.distance_transform_edt(mascara)
+    fator = np.clip(distancia_interna / float(feather_pixels), 0.0, 1.0)
+    alpha_suave = alpha.astype(np.float32) * fator
+    alpha_suave[~mascara] = 0.0
+    return alpha_suave.astype(np.uint8)
+
+
+def _converter_tif_para_png(
+    caminho_tif: Path,
+    paleta: List[str],
+    caminho_saida: Path,
+    caminho_kml: Optional[Path] = None,
+    expand_percent: float = 0.0,
+    feather_pixels: int = 0,
+) -> List[dict]:
     with rasterio.open(caminho_tif) as src:
         dados = src.read(1, masked=True)
         if dados.mask.all():
@@ -400,7 +479,22 @@ def _converter_tif_para_png(caminho_tif: Path, paleta: List[str], caminho_saida:
 
         indices = np.digitize(dados.filled(vmin), limites[1:-1], right=False)
         rgba = colormap(indices)
-        rgba[..., 3] = np.where(dados.mask, 0.0, rgba[..., 3])
+        alpha_base = np.where(dados.mask, 0.0, rgba[..., 3])
+
+        if caminho_kml is not None:
+            mascara_kml = _carregar_mascara_kml(
+                caminho_kml,
+                src.crs,
+                src.transform,
+                dados.shape,
+                expand_percent,
+            )
+            alpha_uint8 = (alpha_base * 255).astype(np.uint8)
+            alpha_uint8 = _aplicar_feather_alpha(alpha_uint8, mascara_kml, feather_pixels)
+            rgba[..., 3] = alpha_uint8.astype(np.float32) / 255.0
+        else:
+            rgba[..., 3] = alpha_base
+
         rgba_uint8 = (rgba * 255).astype(np.uint8)
 
         height, width = dados.shape
@@ -926,11 +1020,23 @@ def converter_tif_png(req: ConverterTifPngRequest):
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
             caminho_tif = _baixar_arquivo_url(req.url, ".tif")
+            caminho_kml: Optional[Path] = None
+            if req.url_kml:
+                caminho_kml = _baixar_arquivo_url(req.url_kml, ".kml")
             try:
                 caminho_png = Path(temp_dir) / f"{_nome_blob_png(req.url, req.id_referencia)}.png"
-                ranges_palette = _converter_tif_para_png(caminho_tif, paleta, caminho_png)
+                ranges_palette = _converter_tif_para_png(
+                    caminho_tif,
+                    paleta,
+                    caminho_png,
+                    caminho_kml=caminho_kml,
+                    expand_percent=req.expand_percent,
+                    feather_pixels=req.feather_pixels,
+                )
             finally:
                 caminho_tif.unlink(missing_ok=True)
+                if caminho_kml is not None:
+                    caminho_kml.unlink(missing_ok=True)
 
             nome_blob = caminho_png.name
             logger.log(
